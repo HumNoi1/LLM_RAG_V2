@@ -1,0 +1,59 @@
+[project]
+name = "rag-exam-grading"
+version = "0.1.0"
+description = "LLM RAG Exam Grading API — FastAPI + LlamaIndex + Groq + Qdrant"
+requires-python = ">=3.12"
+dependencies = [
+    # Web Framework
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.6",
+    "python-multipart>=0.0.12",
+    "aiofiles>=24.1.0",
+    # Auth
+    "python-jose[cryptography]>=3.3.0",
+    "passlib[bcrypt]>=1.7.4",
+    "bcrypt>=4.2.0",
+    # LlamaIndex
+    "llama-index-core>=0.11.0",
+    "llama-index-vector-stores-qdrant>=0.3.0",
+    "llama-index-llms-groq>=0.2.0",
+    "llama-index-embeddings-huggingface>=0.3.0",
+    # Embedding Model
+    "FlagEmbedding>=1.2.11",
+    "sentence-transformers>=3.2.0",
+    "torch>=2.2.0",
+    # Vector DB
+    "qdrant-client>=1.11.0",
+    # Database
+    "supabase>=2.9.0",
+    "sqlalchemy>=2.0.0",
+    "asyncpg>=0.29.0",
+    # PDF Processing
+    "pdfplumber>=0.11.4",
+    # Config & Utilities
+    "pydantic>=2.9.0",
+    "pydantic-settings>=2.5.0",
+    "python-dotenv>=1.0.1",
+    "httpx>=0.27.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.24.0",
+]
+
+[tool.uv]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.24.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
