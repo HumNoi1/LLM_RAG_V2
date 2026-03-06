@@ -1,9 +1,9 @@
 """
-PoC: Groq API (llama-3.3-70b-versatile) — Thai essay grading test
+PoC: Groq API (qwen/qwen3-32b) — Thai essay grading test
 
 Validates:
   - Groq API connection works
-  - llama-3.3-70b can grade a Thai essay question
+  - qwen/qwen3-32b can grade a Thai essay question
   - JSON response is parseable
 
 Prerequisites:
@@ -87,7 +87,7 @@ def parse_json_from_response(text: str) -> dict:
 
 def main() -> None:
     print("=" * 60)
-    print("PoC: Groq API — Thai Exam Grading (llama-3.3-70b)")
+    print("PoC: Groq API — Thai Exam Grading (qwen/qwen3-32b)")
     print("=" * 60)
 
     # 1. Check API key
@@ -100,9 +100,9 @@ def main() -> None:
     print(f"\n[1] API key loaded (***{api_key[-6:]})")
 
     # 2. Init Groq LLM
-    print("\n[2] Initializing Groq llama-3.3-70b-versatile...")
+    print("\n[2] Initializing Groq qwen/qwen3-32b...")
     llm = Groq(
-        model="llama-3.3-70b-versatile",
+        model="qwen/qwen3-32b",
         api_key=api_key,
         temperature=0.1,
         max_tokens=1024,
