@@ -10,7 +10,7 @@
 
 ```
 ┌──────────────────┐     ┌──────────────────────┐     ┌──────────────────┐
-│   Next.js 14     │────▶│   FastAPI Backend     │────▶│   Groq LLM API   │
+│   Next.js 15     │────▶│   FastAPI Backend     │────▶│   Groq LLM API   │
 │   (Frontend)     │◀────│   (Python 3.12)       │◀────│   (llama-3.3)    │
 │   Port: 3000     │     │   Port: 8000          │     └──────────────────┘
 └──────────────────┘     │                       │     ┌──────────────────┐
@@ -28,7 +28,7 @@
 
 | Layer | Technology |
 |-------|-----------|
-| **Frontend** | Next.js 14 (App Router), TypeScript, Tailwind CSS, shadcn/ui, Zustand, react-pdf |
+| **Frontend** | Next.js 15 (App Router), TypeScript, Tailwind CSS, shadcn/ui, Zustand, react-pdf |
 | **Backend** | Python 3.12, FastAPI, LlamaIndex, Pydantic v2 |
 | **LLM** | Groq API (llama-3.3-70b-versatile) |
 | **Embedding** | BAAI/bge-m3 (local, multilingual/Thai) |
