@@ -17,6 +17,8 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
+from llama_index.core.llms import ChatMessage
+
 from app.core.exceptions import LLMException
 from app.services.rag_service import _parse_json_from_response
 
@@ -171,7 +173,7 @@ class TestRetrieveContext:
         node2.metadata = {"doc_type": "rubric"}
 
         mock_retriever = MagicMock()
-        mock_retriever.retrieve.return_value = [node1, node2]
+        mock_retriever.aretrieve = AsyncMock(return_value=[node1, node2])
 
         mock_index = MagicMock()
         mock_index.as_retriever.return_value = mock_retriever
@@ -192,7 +194,7 @@ class TestRetrieveContext:
         mock_embed.return_value = MagicMock()
 
         mock_retriever = MagicMock()
-        mock_retriever.retrieve.return_value = []
+        mock_retriever.aretrieve = AsyncMock(return_value=[])
 
         mock_index = MagicMock()
         mock_index.as_retriever.return_value = mock_retriever
@@ -200,3 +202,88 @@ class TestRetrieveContext:
 
         result = await retrieve_context(uuid4(), "คำถาม")
         assert "ไม่พบเนื้อหาอ้างอิง" in result
+
+    @patch("app.services.rag_service.get_index_for_exam")
+    @patch("app.services.rag_service.get_embed_model")
+    @patch("app.services.rag_service.Settings")
+    async def test_uses_exam_id_metadata_filter(self, mock_settings, mock_embed, mock_get_index):
+        """retrieve_context must pass MetadataFilters with exam_id — not a raw dict."""
+        from app.services.rag_service import retrieve_context
+        from llama_index.core.vector_stores import MetadataFilters
+
+        mock_embed.return_value = MagicMock()
+        exam_id = uuid4()
+
+        mock_retriever = MagicMock()
+        mock_retriever.aretrieve = AsyncMock(return_value=[])
+        mock_index = MagicMock()
+        mock_index.as_retriever.return_value = mock_retriever
+        mock_get_index.return_value = mock_index
+
+        await retrieve_context(exam_id, "คำถาม")
+
+        _, kwargs = mock_index.as_retriever.call_args
+        assert "filters" in kwargs
+        assert isinstance(kwargs["filters"], MetadataFilters)
+        assert kwargs["filters"].filters[0].key == "exam_id"
+        assert kwargs["filters"].filters[0].value == str(exam_id)
+
+
+# ── Tests: _call_llm_with_retry ─────────────────────────────────────────
+
+@pytest.mark.asyncio
+class TestCallLlmWithRetry:
+
+    async def test_returns_on_success(self):
+        """Should return content on first successful call."""
+        from app.services.rag_service import _call_llm_with_retry
+
+        llm = MagicMock()
+        response = MagicMock()
+        response.message.content = '{"score": 8.0}'
+        llm.chat.return_value = response
+
+        result = await _call_llm_with_retry(llm, [ChatMessage(role="user", content="test")])
+        assert result == '{"score": 8.0}'
+        assert llm.chat.call_count == 1
+
+    @patch("asyncio.sleep", new_callable=AsyncMock)
+    async def test_retries_on_429_then_succeeds(self, mock_sleep):
+        """Should retry after 429 and return on subsequent success."""
+        from app.services.rag_service import _call_llm_with_retry
+
+        llm = MagicMock()
+        response = MagicMock()
+        response.message.content = '{"score": 5.0}'
+        llm.chat.side_effect = [RuntimeError("429 Too Many Requests"), response]
+
+        result = await _call_llm_with_retry(llm, [ChatMessage(role="user", content="test")])
+
+        assert result == '{"score": 5.0}'
+        assert llm.chat.call_count == 2
+        mock_sleep.assert_awaited_once()
+
+    @patch("asyncio.sleep", new_callable=AsyncMock)
+    async def test_raises_after_max_retries(self, mock_sleep):
+        """Should raise after exhausting all retries on 429."""
+        from app.services.rag_service import _call_llm_with_retry
+
+        llm = MagicMock()
+        llm.chat.side_effect = RuntimeError("429 Too Many Requests")
+
+        with pytest.raises(RuntimeError, match="429"):
+            await _call_llm_with_retry(llm, [ChatMessage(role="user", content="test")])
+
+        assert llm.chat.call_count == 3  # all retries exhausted
+
+    async def test_does_not_retry_non_rate_limit_error(self):
+        """Non-429 errors should raise immediately without any retry."""
+        from app.services.rag_service import _call_llm_with_retry
+
+        llm = MagicMock()
+        llm.chat.side_effect = RuntimeError("Connection refused")
+
+        with pytest.raises(RuntimeError, match="Connection refused"):
+            await _call_llm_with_retry(llm, [ChatMessage(role="user", content="test")])
+
+        assert llm.chat.call_count == 1  # no retries

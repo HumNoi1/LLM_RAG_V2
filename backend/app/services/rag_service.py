@@ -9,6 +9,7 @@ Pipeline per question:
   4. Call Groq llama-3.3-70b-versatile
   5. Parse JSON response → score + reasoning
 """
+import asyncio
 import json
 import logging
 import re
@@ -16,14 +17,19 @@ from uuid import UUID
 
 from llama_index.core import Settings
 from llama_index.core.llms import ChatMessage
+from llama_index.core.vector_stores import MetadataFilter, MetadataFilters
 from llama_index.llms.groq import Groq
-from qdrant_client.models import FieldCondition, Filter, MatchValue
 
 from app.config import get_settings
 from app.core.exceptions import LLMException
-from app.services.embedding_service import get_embed_model, get_index_for_exam, _get_vector_store
+from app.services.embedding_service import get_embed_model, get_index_for_exam
 
 logger = logging.getLogger(__name__)
+
+# ── Rate limiting config ──────────────────────────────────────────────────────
+
+_GROQ_MAX_RETRIES = 3
+_GROQ_BASE_DELAY = 2  # seconds
 
 # ── Grading prompt template ───────────────────────────────────────────────────
 
@@ -76,6 +82,30 @@ def _parse_json_from_response(text: str) -> dict:
     raise ValueError(f"No valid JSON found in LLM response")
 
 
+async def _call_llm_with_retry(llm: Groq, messages: list[ChatMessage]) -> str:
+    """Call Groq LLM with exponential backoff on HTTP 429 rate limit errors.
+
+    Retries up to _GROQ_MAX_RETRIES times with exponential backoff starting at
+    _GROQ_BASE_DELAY seconds.
+    """
+    delay = _GROQ_BASE_DELAY
+    for attempt in range(_GROQ_MAX_RETRIES):
+        try:
+            response = await asyncio.to_thread(llm.chat, messages)
+            return response.message.content
+        except Exception as e:
+            is_rate_limit = "429" in str(e) or "rate limit" in str(e).lower()
+            if is_rate_limit and attempt < _GROQ_MAX_RETRIES - 1:
+                logger.warning(
+                    "Groq rate limit hit, retrying in %ds (attempt %d/%d)",
+                    delay, attempt + 1, _GROQ_MAX_RETRIES,
+                )
+                await asyncio.sleep(delay)
+                delay *= 2
+            else:
+                raise
+
+
 async def retrieve_context(
     exam_id: UUID,
     question_text: str,
@@ -92,14 +122,12 @@ async def retrieve_context(
     # Build retriever with metadata filter for this exam
     retriever = index.as_retriever(
         similarity_top_k=top_k,
-        filters={
-            "must": [
-                {"key": "exam_id", "value": str(exam_id), "type": "text"}
-            ]
-        },
+        filters=MetadataFilters(
+            filters=[MetadataFilter(key="exam_id", value=str(exam_id))]
+        ),
     )
 
-    nodes = retriever.retrieve(question_text)
+    nodes = await retriever.aretrieve(question_text)
 
     if not nodes:
         logger.warning("No context chunks found for exam_id=%s, query='%s'", exam_id, question_text[:50])
@@ -143,10 +171,9 @@ async def query_for_grading(
             context=context,
         )
 
-        # 3. Call Groq LLM
+        # 3. Call Groq LLM with retry on rate limit
         llm = _get_groq_llm()
-        response = llm.chat([ChatMessage(role="user", content=prompt)])
-        raw_response = response.message.content
+        raw_response = await _call_llm_with_retry(llm, [ChatMessage(role="user", content=prompt)])
 
         logger.debug("LLM response for exam=%s: %s", exam_id, raw_response[:200])
 
@@ -167,6 +194,8 @@ async def query_for_grading(
     except (json.JSONDecodeError, ValueError) as e:
         logger.error("Failed to parse LLM grading response: %s", e)
         raise LLMException(f"Failed to parse grading response: {e}") from e
+    except LLMException:
+        raise
     except Exception as e:
         logger.error("RAG grading query failed for exam=%s: %s", exam_id, e)
         raise LLMException(str(e)) from e
