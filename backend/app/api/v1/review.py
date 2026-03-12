@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 
 from app import schemas
-from app.dependencies import get_current_user, get_supabase
+from app.dependencies import get_current_user
 
 router = APIRouter()
 
@@ -24,7 +24,6 @@ router = APIRouter()
 async def list_submissions_with_summary(
     exam_id: UUID,
     current_user: Annotated[dict, Depends(get_current_user)],
-    supabase=Depends(get_supabase),
 ):
     """BE-J: implement in Sprint 3."""
     raise NotImplementedError
@@ -34,7 +33,6 @@ async def list_submissions_with_summary(
 async def get_submission_detail(
     submission_id: UUID,
     current_user: Annotated[dict, Depends(get_current_user)],
-    supabase=Depends(get_supabase),
 ):
     """BE-J: implement in Sprint 3."""
     raise NotImplementedError
@@ -44,7 +42,6 @@ async def get_submission_detail(
 async def approve_result(
     result_id: UUID,
     current_user: Annotated[dict, Depends(get_current_user)],
-    supabase=Depends(get_supabase),
 ):
     """Approve LLM score as-is. BE-J: implement in Sprint 3."""
     raise NotImplementedError
@@ -55,7 +52,6 @@ async def revise_result(
     result_id: UUID,
     data: schemas.ReviseResultRequest,
     current_user: Annotated[dict, Depends(get_current_user)],
-    supabase=Depends(get_supabase),
 ):
     """Override LLM score with expert score + feedback. BE-J: implement in Sprint 3."""
     raise NotImplementedError
@@ -65,7 +61,6 @@ async def revise_result(
 async def bulk_approve(
     exam_id: UUID,
     current_user: Annotated[dict, Depends(get_current_user)],
-    supabase=Depends(get_supabase),
 ):
     """Bulk approve all pending grading results for an exam. BE-J: implement in Sprint 3."""
     raise NotImplementedError
@@ -75,7 +70,6 @@ async def bulk_approve(
 async def export_results_csv(
     exam_id: UUID,
     current_user: Annotated[dict, Depends(get_current_user)],
-    supabase=Depends(get_supabase),
 ):
     """Export grading results as CSV. BE-J: implement in Sprint 3.
     Response: text/csv with student name, scores per question, total, status.

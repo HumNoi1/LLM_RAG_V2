@@ -10,7 +10,7 @@ from uuid import UUID
 from fastapi import APIRouter, BackgroundTasks, Depends
 
 from app import schemas
-from app.dependencies import get_current_user, get_supabase
+from app.dependencies import get_current_user
 from app.services import grading_service
 
 router = APIRouter()
@@ -21,7 +21,6 @@ async def start_grading(
     data: schemas.GradingStartRequest,
     background_tasks: BackgroundTasks,
     current_user: Annotated[dict, Depends(get_current_user)],
-    supabase=Depends(get_supabase),
 ):
     """Trigger LLM grading for all submissions in an exam.
     Grading runs in the background — poll /status/{exam_id} for progress.
@@ -35,7 +34,6 @@ async def start_grading(
 async def grading_status(
     exam_id: UUID,
     current_user: Annotated[dict, Depends(get_current_user)],
-    supabase=Depends(get_supabase),
 ):
     """Poll current grading progress for an exam.
     BE-S: implement in Sprint 3.

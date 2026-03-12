@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { BookOpen, Mail, Lock, User, CheckCircle2, AlertCircle, BadgeCheck, Eye, EyeOff } from 'lucide-react';
+import api from '@/lib/api';
 
 type FormMode = 'login' | 'register';
 
@@ -32,12 +33,12 @@ export default function App() {
     return password.length >= 8;
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setMessage(null);
     
     if (mode === 'register') {
-      if (!formData.name || !formData.teacherId || !formData.email || !formData.password) {
+      if (!formData.name || !formData.email || !formData.password) {
         setMessage({ type: 'error', text: 'กรุณากรอกข้อมูลให้ครบถ้วน' });
         return;
       }
@@ -54,24 +55,33 @@ export default function App() {
         return;
       }
       
-      // TODO: Replace with real API call in Sprint 2
-      console.warn('[DEV] Using mock registration — replace with real API in Sprint 2');
-      
-      // For mock registration, also auto-login and store tokens
-      localStorage.setItem('authToken', 'mock-token-' + Date.now());
-      localStorage.setItem('refreshToken', 'mock-refresh-token');
-      localStorage.setItem('user', JSON.stringify({
-        id: Math.random().toString(),
-        email: formData.email,
-        name: formData.name,
-        teacherId: formData.teacherId,
-        role: 'teacher'
-      }));
-      
-      setMessage({ type: 'success', text: 'ลงทะเบียนสำเร็จ! และเข้าสู่ระบบแล้ว' });
-      setTimeout(() => {
-        router.push('/dashboard');
-      }, 800);
+      try {
+        const registerRes = await api.post('/auth/register', {
+          email: formData.email,
+          password: formData.password,
+          full_name: formData.name,
+          role: 'teacher',
+        });
+
+        // Auto-login after registration
+        const loginRes = await api.post('/auth/login', {
+          email: formData.email,
+          password: formData.password,
+        });
+
+        const { access_token, refresh_token } = loginRes.data;
+        localStorage.setItem('authToken', access_token);
+        localStorage.setItem('refreshToken', refresh_token);
+        localStorage.setItem('user', JSON.stringify(registerRes.data));
+
+        setMessage({ type: 'success', text: 'ลงทะเบียนสำเร็จ! และเข้าสู่ระบบแล้ว' });
+        setTimeout(() => {
+          router.push('/dashboard');
+        }, 800);
+      } catch (err: any) {
+        const detail = err?.response?.data?.detail || 'เกิดข้อผิดพลาดในการลงทะเบียน';
+        setMessage({ type: 'error', text: detail });
+      }
     } else {
       if (!formData.email || !formData.password) {
         setMessage({ type: 'error', text: 'กรุณากรอกอีเมลและรหัสผ่าน' });
@@ -81,28 +91,31 @@ export default function App() {
         setMessage({ type: 'error', text: 'อีเมลไม่ถูกต้อง' });
         return;
       }
-      // TODO: Replace with real API call in Sprint 2
-      // const response = await api.post('/auth/login', {
-      //   email: formData.email,
-      //   password: formData.password
-      // });
-      console.warn('[DEV] Using mock login — replace with real API in Sprint 2');
-      
-      // Store mock tokens in localStorage for ProtectedRoute
-      localStorage.setItem('authToken', 'mock-token-' + Date.now());
-      localStorage.setItem('refreshToken', 'mock-refresh-token');
-      localStorage.setItem('user', JSON.stringify({
-        id: '1',
-        email: formData.email,
-        name: 'อ.สมชาย ใจดี',
-        teacherId: 'T123456',
-        role: 'teacher'
-      }));
-      
-      setMessage({ type: 'success', text: 'เข้าสู่ระบบสำเร็จ ยินดีต้อนรับอาจารย์' });
-      setTimeout(() => {
-        router.push('/dashboard');
-      }, 800);
+
+      try {
+        const loginRes = await api.post('/auth/login', {
+          email: formData.email,
+          password: formData.password,
+        });
+
+        const { access_token, refresh_token } = loginRes.data;
+        localStorage.setItem('authToken', access_token);
+        localStorage.setItem('refreshToken', refresh_token);
+
+        // Fetch user profile
+        const meRes = await api.get('/auth/me', {
+          headers: { Authorization: `Bearer ${access_token}` },
+        });
+        localStorage.setItem('user', JSON.stringify(meRes.data));
+
+        setMessage({ type: 'success', text: 'เข้าสู่ระบบสำเร็จ ยินดีต้อนรับอาจารย์' });
+        setTimeout(() => {
+          router.push('/dashboard');
+        }, 800);
+      } catch (err: any) {
+        const detail = err?.response?.data?.detail || 'อีเมลหรือรหัสผ่านไม่ถูกต้อง';
+        setMessage({ type: 'error', text: detail });
+      }
     }
   };
 

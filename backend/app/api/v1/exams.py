@@ -19,7 +19,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends
 
 from app import schemas
-from app.dependencies import get_current_user, get_supabase
+from app.dependencies import get_current_user
 
 router = APIRouter()
 
@@ -30,7 +30,6 @@ router = APIRouter()
 async def create_exam(
     data: schemas.ExamCreate,
     current_user: Annotated[dict, Depends(get_current_user)],
-    supabase=Depends(get_supabase),
 ):
     """BE-J: implement in Sprint 2."""
     raise NotImplementedError
@@ -39,7 +38,6 @@ async def create_exam(
 @router.get("", response_model=schemas.ExamListResponse)
 async def list_exams(
     current_user: Annotated[dict, Depends(get_current_user)],
-    supabase=Depends(get_supabase),
 ):
     """BE-J: implement in Sprint 2."""
     raise NotImplementedError
@@ -49,7 +47,6 @@ async def list_exams(
 async def get_exam(
     exam_id: UUID,
     current_user: Annotated[dict, Depends(get_current_user)],
-    supabase=Depends(get_supabase),
 ):
     """BE-J: implement in Sprint 2."""
     raise NotImplementedError
@@ -60,7 +57,6 @@ async def update_exam(
     exam_id: UUID,
     data: schemas.ExamUpdate,
     current_user: Annotated[dict, Depends(get_current_user)],
-    supabase=Depends(get_supabase),
 ):
     """BE-J: implement in Sprint 2."""
     raise NotImplementedError
@@ -70,7 +66,6 @@ async def update_exam(
 async def delete_exam(
     exam_id: UUID,
     current_user: Annotated[dict, Depends(get_current_user)],
-    supabase=Depends(get_supabase),
 ):
     """BE-J: implement in Sprint 2."""
     raise NotImplementedError
@@ -83,7 +78,6 @@ async def add_question(
     exam_id: UUID,
     data: schemas.QuestionCreate,
     current_user: Annotated[dict, Depends(get_current_user)],
-    supabase=Depends(get_supabase),
 ):
     """BE-J: implement in Sprint 2."""
     raise NotImplementedError
@@ -95,7 +89,6 @@ async def update_question(
     question_id: UUID,
     data: schemas.QuestionUpdate,
     current_user: Annotated[dict, Depends(get_current_user)],
-    supabase=Depends(get_supabase),
 ):
     """BE-J: implement in Sprint 2."""
     raise NotImplementedError
@@ -106,7 +99,6 @@ async def delete_question(
     exam_id: UUID,
     question_id: UUID,
     current_user: Annotated[dict, Depends(get_current_user)],
-    supabase=Depends(get_supabase),
 ):
     """BE-J: implement in Sprint 2."""
     raise NotImplementedError

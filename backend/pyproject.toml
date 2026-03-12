@@ -25,9 +25,7 @@ dependencies = [
     # Vector DB
     "qdrant-client>=1.11.0",
     # Database
-    "supabase>=2.9.0",
-    "sqlalchemy>=2.0.0",
-    "asyncpg>=0.29.0",
+    "prisma>=0.15.0",
     # PDF Processing
     "pdfplumber>=0.11.4",
     # Config & Utilities

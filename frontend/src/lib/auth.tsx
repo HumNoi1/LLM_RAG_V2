@@ -1,13 +1,14 @@
     'use client';
 
     import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+    import api from '@/lib/api';
 
     // ─── Types ────────────────────────────────────────────────────────────────────
     export interface User {
     id?: string;
     email: string;
-    name?: string;
-    teacherId?: string;
+    full_name?: string;
+    role?: string;
     }
 
     export interface AuthContextType {
@@ -16,7 +17,7 @@
     isAuthenticated: boolean;
     login: (email: string, password: string) => Promise<void>;
     logout: () => Promise<void>;
-    register: (email: string, password: string, name: string, teacherId: string) => Promise<void>;
+    register: (email: string, password: string, full_name: string) => Promise<void>;
     error: string | null;
     }
 
@@ -35,10 +36,16 @@
         try {
             const token = typeof window !== 'undefined' ? localStorage.getItem('authToken') : null;
             if (token) {
-            // In a real app, verify token with backend
-            const userData = localStorage.getItem('user');
-            if (userData) {
-                setUser(JSON.parse(userData));
+            // Try to fetch user profile from backend
+            try {
+                const res = await api.get('/auth/me');
+                setUser(res.data);
+                localStorage.setItem('user', JSON.stringify(res.data));
+            } catch {
+                // Token invalid, clear storage
+                localStorage.removeItem('authToken');
+                localStorage.removeItem('refreshToken');
+                localStorage.removeItem('user');
             }
             }
         } catch (err) {
@@ -55,27 +62,17 @@
         setIsLoading(true);
         setError(null);
         try {
-        // TODO: Replace with actual API call
-        // const response = await fetch('/api/auth/login', {
-        //   method: 'POST',
-        //   headers: { 'Content-Type': 'application/json' },
-        //   body: JSON.stringify({ email, password }),
-        // });
-        // const data = await response.json();
+        const loginRes = await api.post('/auth/login', { email, password });
+        const { access_token, refresh_token } = loginRes.data;
 
-        // Mock successful login
-        const mockUser: User = {
-            id: '1',
-            email,
-            name: 'อ.สมชาย ใจดี',
-            teacherId: 'T123456',
-        };
+        localStorage.setItem('authToken', access_token);
+        localStorage.setItem('refreshToken', refresh_token);
 
-        setUser(mockUser);
-        if (typeof window !== 'undefined') {
-            localStorage.setItem('authToken', 'mock-token-123');
-            localStorage.setItem('user', JSON.stringify(mockUser));
-        }
+        const meRes = await api.get('/auth/me', {
+            headers: { Authorization: `Bearer ${access_token}` },
+        });
+        setUser(meRes.data);
+        localStorage.setItem('user', JSON.stringify(meRes.data));
         } catch (err) {
         const errorMessage = err instanceof Error ? err.message : 'Login failed';
         setError(errorMessage);
@@ -89,12 +86,10 @@
         setIsLoading(true);
         setError(null);
         try {
-        // TODO: Replace with actual API call
-        // await fetch('/api/auth/logout', { method: 'POST' });
-
         setUser(null);
         if (typeof window !== 'undefined') {
             localStorage.removeItem('authToken');
+            localStorage.removeItem('refreshToken');
             localStorage.removeItem('user');
         }
         } catch (err) {
@@ -106,31 +101,26 @@
         }
     };
 
-    const register = async (email: string, password: string, name: string, teacherId: string) => {
+    const register = async (email: string, password: string, full_name: string) => {
         setIsLoading(true);
         setError(null);
         try {
-        // TODO: Replace with actual API call
-        // const response = await fetch('/api/auth/register', {
-        //   method: 'POST',
-        //   headers: { 'Content-Type': 'application/json' },
-        //   body: JSON.stringify({ email, password, name, teacherId }),
-        // });
-        // const data = await response.json();
-
-        // Mock successful registration
-        const mockUser: User = {
-            id: '2',
+        const registerRes = await api.post('/auth/register', {
             email,
-            name,
-            teacherId,
-        };
+            password,
+            full_name,
+            role: 'teacher',
+        });
 
-        setUser(mockUser);
-        if (typeof window !== 'undefined') {
-            localStorage.setItem('authToken', 'mock-token-456');
-            localStorage.setItem('user', JSON.stringify(mockUser));
-        }
+        // Auto-login after registration
+        const loginRes = await api.post('/auth/login', { email, password });
+        const { access_token, refresh_token } = loginRes.data;
+
+        localStorage.setItem('authToken', access_token);
+        localStorage.setItem('refreshToken', refresh_token);
+
+        setUser(registerRes.data);
+        localStorage.setItem('user', JSON.stringify(registerRes.data));
         } catch (err) {
         const errorMessage = err instanceof Error ? err.message : 'Registration failed';
         setError(errorMessage);

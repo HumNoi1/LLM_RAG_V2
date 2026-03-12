@@ -2,7 +2,7 @@ import axios, { AxiosInstance, AxiosError, InternalAxiosRequestConfig } from 'ax
 
 // ─── API Instance ─────────────────────────────────────────────────────────────
 const api: AxiosInstance = axios.create({
-  baseURL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api',
+  baseURL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1',
   headers: {
     'Content-Type': 'application/json',
   },
@@ -26,17 +26,17 @@ const refreshAccessToken = async (): Promise<string | null> => {
     }
 
     const response = await axios.post(
-      `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api'}/auth/refresh`,
-      { refreshToken }
+      `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1'}/auth/refresh`,
+      { refresh_token: refreshToken }
     );
 
-    const { token, refreshToken: newRefreshToken } = response.data;
-    localStorage.setItem('authToken', token);
+    const { access_token, refresh_token: newRefreshToken } = response.data;
+    localStorage.setItem('authToken', access_token);
     if (newRefreshToken) {
       localStorage.setItem('refreshToken', newRefreshToken);
     }
 
-    return token;
+    return access_token;
   } catch (error) {
     localStorage.removeItem('authToken');
     localStorage.removeItem('refreshToken');

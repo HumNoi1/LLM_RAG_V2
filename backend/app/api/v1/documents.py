@@ -12,7 +12,7 @@ from uuid import UUID
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, UploadFile
 
 from app import schemas
-from app.dependencies import get_current_user, get_supabase
+from app.dependencies import get_current_user
 
 router = APIRouter()
 
@@ -26,7 +26,6 @@ async def upload_reference_document(
     file: UploadFile = File(..., description="PDF only"),
     background_tasks: BackgroundTasks = BackgroundTasks(),
     current_user: Annotated[dict, Depends(get_current_user)] = None,
-    supabase=Depends(get_supabase),
 ):
     """Upload a reference PDF (answer key / rubric / course material).
     Parsing and embedding run asynchronously via BackgroundTasks.
@@ -39,7 +38,6 @@ async def upload_reference_document(
 async def list_documents(
     exam_id: UUID,
     current_user: Annotated[dict, Depends(get_current_user)] = None,
-    supabase=Depends(get_supabase),
 ):
     """List all documents for an exam with their embedding status.
     BE-J: implement in Sprint 2.
@@ -56,7 +54,6 @@ async def upload_student_submission(
     file: UploadFile = File(..., description="PDF only"),
     background_tasks: BackgroundTasks = BackgroundTasks(),
     current_user: Annotated[dict, Depends(get_current_user)] = None,
-    supabase=Depends(get_supabase),
 ):
     """Upload a student answer PDF. Parses text asynchronously.
     BE-J: implement in Sprint 2.
@@ -68,7 +65,6 @@ async def upload_student_submission(
 async def list_submissions(
     exam_id: UUID,
     current_user: Annotated[dict, Depends(get_current_user)] = None,
-    supabase=Depends(get_supabase),
 ):
     """List all student submissions for an exam.
     BE-J: implement in Sprint 2.

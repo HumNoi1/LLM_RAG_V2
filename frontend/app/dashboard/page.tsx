@@ -5,7 +5,7 @@ import {
   BookOpen, FileText, ClipboardList, LogOut, Bell,
   TrendingUp, Users, ChevronRight, Clock, CheckCircle, AlertCircle, LayoutDashboard
 } from 'lucide-react';
-import { ProtectedRoute } from '@/src/components/ProtectedRoute';
+import { ProtectedRoute } from '@/components/ProtectedRoute';
 
 // ─── Mock Data ────────────────────────────────────────────────────────────────
 const MOCK_STATS = {
