@@ -6,15 +6,82 @@ GET  /api/v1/documents?exam_id=...       ← BE-J Sprint 2
 POST /api/v1/submissions/upload          ← BE-J Sprint 2
 GET  /api/v1/submissions?exam_id=...     ← BE-J Sprint 2
 """
+import logging
+import os
+from pathlib import Path
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile, status
 
 from app import schemas
+from app.config import get_settings
+from app.core.exceptions import PDFParseException, EmbeddingException
+from app.database import db
 from app.dependencies import get_current_user
+from app.services.pdf_service import parse_pdf_bytes
+from app.services.embedding_service import embed_document
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+# Upload directory (relative to backend root)
+UPLOAD_DIR = Path("uploads")
+
+
+def _get_upload_dir(exam_id: UUID, sub: str = "documents") -> Path:
+    """Return and ensure upload directory exists."""
+    upload_path = UPLOAD_DIR / str(exam_id) / sub
+    upload_path.mkdir(parents=True, exist_ok=True)
+    return upload_path
+
+
+# ── Background task: parse + embed ────────────────────────────────────────────
+
+async def _process_and_embed_document(doc_id: str, exam_id: str, file_data: bytes, filename: str) -> None:
+    """Background task: parse PDF → embed into Qdrant → update DB status."""
+    try:
+        # Update status → processing
+        await db.document.update(
+            where={"id": doc_id},
+            data={"embeddingStatus": "processing"},
+        )
+
+        # Parse PDF
+        text = parse_pdf_bytes(file_data, filename)
+
+        # Embed
+        doc_record = await db.document.find_unique(where={"id": doc_id})
+        chunk_count = await embed_document(
+            exam_id=UUID(exam_id),
+            doc_id=UUID(doc_id),
+            doc_type=doc_record.docType,
+            text=text,
+        )
+
+        # Update status → completed
+        await db.document.update(
+            where={"id": doc_id},
+            data={
+                "embeddingStatus": "completed",
+                "chunkCount": chunk_count,
+            },
+        )
+        logger.info("Document %s embedded successfully (%d chunks)", doc_id, chunk_count)
+
+    except (PDFParseException, EmbeddingException) as e:
+        logger.error("Document processing failed for %s: %s", doc_id, e.message)
+        await db.document.update(
+            where={"id": doc_id},
+            data={"embeddingStatus": "failed"},
+        )
+    except Exception as e:
+        logger.error("Unexpected error processing document %s: %s", doc_id, e)
+        await db.document.update(
+            where={"id": doc_id},
+            data={"embeddingStatus": "failed"},
+        )
 
 
 # ── Reference documents (answer key / rubric / course material) ───────────────
@@ -29,9 +96,77 @@ async def upload_reference_document(
 ):
     """Upload a reference PDF (answer key / rubric / course material).
     Parsing and embedding run asynchronously via BackgroundTasks.
-    BE-S: implement in Sprint 2.
     """
-    raise NotImplementedError
+    # Validate file type
+    if not file.filename or not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only PDF files are accepted",
+        )
+
+    # Validate file size (max 50MB)
+    file_data = await file.read()
+    max_size = 50 * 1024 * 1024  # 50 MB
+    if len(file_data) > max_size:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="File size exceeds 50MB limit",
+        )
+
+    # Verify exam exists
+    exam = await db.exam.find_unique(where={"id": str(exam_id)})
+    if not exam:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Exam '{exam_id}' not found",
+        )
+
+    # Save file to disk
+    upload_dir = _get_upload_dir(exam_id)
+    safe_filename = file.filename.replace("/", "_").replace("\\", "_")
+    file_path = upload_dir / safe_filename
+
+    # Handle duplicate filenames by appending counter
+    counter = 1
+    original_stem = file_path.stem
+    while file_path.exists():
+        file_path = upload_dir / f"{original_stem}_{counter}{file_path.suffix}"
+        counter += 1
+
+    file_path.write_bytes(file_data)
+
+    # Create DB record
+    doc_record = await db.document.create(
+        data={
+            "examId": str(exam_id),
+            "docType": doc_type.value,
+            "originalFilename": safe_filename,
+            "filePath": str(file_path),
+            "embeddingStatus": "pending",
+        }
+    )
+
+    # Schedule background processing
+    background_tasks.add_task(
+        _process_and_embed_document,
+        doc_id=doc_record.id,
+        exam_id=str(exam_id),
+        file_data=file_data,
+        filename=safe_filename,
+    )
+
+    return schemas.DocumentUploadResponse(
+        message="Document uploaded. Parsing and embedding in progress.",
+        document=schemas.DocumentResponse(
+            id=doc_record.id,
+            exam_id=doc_record.examId,
+            doc_type=doc_record.docType,
+            original_filename=doc_record.originalFilename,
+            embedding_status=doc_record.embeddingStatus,
+            chunk_count=doc_record.chunkCount,
+            created_at=doc_record.createdAt,
+        ),
+    )
 
 
 @router.get("", response_model=schemas.DocumentListResponse)

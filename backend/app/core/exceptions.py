@@ -60,7 +60,7 @@ class PDFParseException(AppException):
         msg = f"Failed to parse PDF '{filename}'"
         if reason:
             msg += f": {reason}"
-        super().__init__(msg, status.HTTP_422_UNPROCESSABLE_ENTITY)
+        super().__init__(msg, status.HTTP_422_UNPROCESSABLE_CONTENT)
 
 
 class EmbeddingException(AppException):

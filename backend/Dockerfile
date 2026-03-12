@@ -10,10 +10,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Install uv
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+COPY pyproject.toml uv.lock* ./
+RUN uv sync --frozen --no-dev --no-cache
 
 COPY . .
+
+# Place uv-managed venv on PATH so uvicorn is found directly
+ENV PATH="/app/.venv/bin:$PATH"
 
 # Dev: hot-reload with uvicorn
 # Production (Sprint 4): remove --reload and set workers > 1
