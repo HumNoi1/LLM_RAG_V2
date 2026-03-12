@@ -1,0 +1,186 @@
+// Prisma schema for LLM RAG Exam Grading — Supabase PostgreSQL
+
+generator client {
+  provider             = "prisma-client-py"
+  interface            = "asyncio"
+  recursive_type_depth = 5
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ========================
+// Enums
+// ========================
+
+enum UserRole {
+  teacher
+  admin
+}
+
+enum DocType {
+  answer_key
+  rubric
+  course_material
+}
+
+enum EmbeddingStatus {
+  pending
+  processing
+  completed
+  failed
+}
+
+enum SubmissionStatus {
+  uploaded
+  parsed
+  grading
+  graded
+  reviewed
+}
+
+enum GradingStatus {
+  pending_review
+  approved
+  revised
+}
+
+// ========================
+// Models
+// ========================
+
+model User {
+  id            String   @id @default(uuid()) @db.Uuid
+  email         String   @unique
+  passwordHash  String   @map("password_hash")
+  fullName      String   @map("full_name")
+  role          UserRole @default(teacher)
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  exams           Exam[]
+  students        Student[]
+  reviewedResults GradingResult[] @relation("ReviewedBy")
+
+  @@map("users")
+}
+
+model Exam {
+  id             String   @id @default(uuid()) @db.Uuid
+  title          String
+  subject        String
+  description    String?  @db.Text
+  createdBy      String   @map("created_by") @db.Uuid
+  totalQuestions Int      @default(0) @map("total_questions")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  creator     User               @relation(fields: [createdBy], references: [id])
+  questions   ExamQuestion[]
+  documents   Document[]
+  submissions StudentSubmission[]
+
+  @@map("exams")
+}
+
+model ExamQuestion {
+  id             String   @id @default(uuid()) @db.Uuid
+  examId         String   @map("exam_id") @db.Uuid
+  questionNumber Int      @map("question_number")
+  questionText   String   @map("question_text") @db.Text
+  maxScore       Float    @map("max_score")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  exam           Exam            @relation(fields: [examId], references: [id], onDelete: Cascade)
+  rubrics        Rubric[]
+  gradingResults GradingResult[]
+
+  @@unique([examId, questionNumber])
+  @@map("exam_questions")
+}
+
+model Rubric {
+  id           String @id @default(uuid()) @db.Uuid
+  questionId   String @map("question_id") @db.Uuid
+  criteriaText String @map("criteria_text") @db.Text
+  scoreRange   String @map("score_range")
+  description  String @db.Text
+
+  question ExamQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@map("rubrics")
+}
+
+model Document {
+  id               String          @id @default(uuid()) @db.Uuid
+  examId           String          @map("exam_id") @db.Uuid
+  docType          DocType         @map("doc_type")
+  originalFilename String          @map("original_filename")
+  filePath         String          @map("file_path")
+  embeddingStatus  EmbeddingStatus @default(pending) @map("embedding_status")
+  chunkCount       Int             @default(0) @map("chunk_count")
+  createdAt        DateTime        @default(now()) @map("created_at")
+
+  exam Exam @relation(fields: [examId], references: [id], onDelete: Cascade)
+
+  @@map("documents")
+}
+
+model Student {
+  id          String   @id @default(uuid()) @db.Uuid
+  studentCode String   @map("student_code")
+  fullName    String   @map("full_name")
+  createdBy   String   @map("created_by") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  creator     User                @relation(fields: [createdBy], references: [id])
+  submissions StudentSubmission[]
+
+  @@unique([studentCode, createdBy])
+  @@map("students")
+}
+
+model StudentSubmission {
+  id               String           @id @default(uuid()) @db.Uuid
+  examId           String           @map("exam_id") @db.Uuid
+  studentId        String           @map("student_id") @db.Uuid
+  originalFilename String           @map("original_filename")
+  filePath         String           @map("file_path")
+  parsedText       String?          @map("parsed_text") @db.Text
+  status           SubmissionStatus @default(uploaded)
+  createdAt        DateTime         @default(now()) @map("created_at")
+
+  exam           Exam            @relation(fields: [examId], references: [id], onDelete: Cascade)
+  student        Student         @relation(fields: [studentId], references: [id])
+  gradingResults GradingResult[]
+
+  @@unique([examId, studentId])
+  @@map("student_submissions")
+}
+
+model GradingResult {
+  id                String        @id @default(uuid()) @db.Uuid
+  submissionId      String        @map("submission_id") @db.Uuid
+  questionId        String        @map("question_id") @db.Uuid
+  studentAnswerText String?       @map("student_answer_text") @db.Text
+  llmScore          Float?        @map("llm_score")
+  llmMaxScore       Float?        @map("llm_max_score")
+  llmReasoning      String?       @map("llm_reasoning") @db.Text
+  llmModelUsed      String?       @map("llm_model_used")
+  expertScore       Float?        @map("expert_score")
+  expertFeedback    String?       @map("expert_feedback") @db.Text
+  status            GradingStatus @default(pending_review)
+  gradedAt          DateTime?     @map("graded_at")
+  reviewedAt        DateTime?     @map("reviewed_at")
+  reviewedBy        String?       @map("reviewed_by") @db.Uuid
+
+  submission StudentSubmission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  question   ExamQuestion      @relation(fields: [questionId], references: [id])
+  reviewer   User?             @relation("ReviewedBy", fields: [reviewedBy], references: [id])
+
+  @@unique([submissionId, questionId])
+  @@map("grading_results")
+}
