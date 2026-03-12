@@ -1,4 +1,3 @@
-from functools import wraps
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
@@ -30,14 +29,19 @@ async def get_current_user(
 
 
 def require_role(*allowed_roles: str):
-    def decorator(func):
-        @wraps(func)
-        async def wrapper(*args, current_user=Depends(get_current_user), **kwargs):
-            if current_user.role not in allowed_roles:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Insufficient permissions",
-                )
-            return await func(*args, current_user=current_user, **kwargs)
-        return wrapper
-    return decorator
+    """Returns a FastAPI Depends that enforces role-based access control.
+
+    Usage:
+        @router.get("/admin/something")
+        async def endpoint(current_user=require_role("admin")):
+            ...
+    """
+    async def role_checker(current_user=Depends(get_current_user)):
+        if current_user.role not in allowed_roles:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Insufficient permissions",
+            )
+        return current_user
+
+    return Depends(role_checker)
