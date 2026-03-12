@@ -54,11 +54,6 @@ app.include_router(grading_router, prefix="/api/v1/grading", tags=["grading"])
 app.include_router(review_router, prefix="/api/v1/review", tags=["review"])
 
 
-@app.get("/health")
-async def health_check():
-    return {"status": "ok"}
-
-
 # ── Health Check ─────────────────────────────────────────────────────────────
 @app.get("/health", tags=["health"])
 async def health_check():
