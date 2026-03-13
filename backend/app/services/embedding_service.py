@@ -8,6 +8,7 @@ Key design decisions:
   - Metadata: exam_id, doc_type tagged on every node
   - Filter by metadata at query time
 """
+
 import logging
 from typing import Optional
 from uuid import UUID
@@ -16,7 +17,7 @@ from llama_index.core import Document, Settings, StorageContext, VectorStoreInde
 from llama_index.core.node_parser import SentenceSplitter
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from llama_index.vector_stores.qdrant import QdrantVectorStore
-from qdrant_client import QdrantClient
+from qdrant_client import QdrantClient, AsyncQdrantClient
 from qdrant_client.models import FieldCondition, Filter, MatchValue
 
 from app.config import get_settings
@@ -27,6 +28,7 @@ logger = logging.getLogger(__name__)
 # ── Singleton clients (lazy init) ─────────────────────────────────────────────
 
 _qdrant_client: Optional[QdrantClient] = None
+_qdrant_async_client: Optional[AsyncQdrantClient] = None
 _embed_model: Optional[HuggingFaceEmbedding] = None
 
 COLLECTION_NAME = "exam_documents"
@@ -40,9 +42,30 @@ def get_qdrant_client() -> QdrantClient:
         _qdrant_client = QdrantClient(
             host=settings.qdrant_host,
             port=settings.qdrant_port,
+            check_compatibility=False,
         )
-        logger.info("Connected to Qdrant at %s:%s", settings.qdrant_host, settings.qdrant_port)
+        logger.info(
+            "Connected to Qdrant at %s:%s", settings.qdrant_host, settings.qdrant_port
+        )
     return _qdrant_client
+
+
+async def get_qdrant_async_client() -> AsyncQdrantClient:
+    """Get or create a singleton Async Qdrant client."""
+    global _qdrant_async_client
+    if _qdrant_async_client is None:
+        settings = get_settings()
+        _qdrant_async_client = AsyncQdrantClient(
+            host=settings.qdrant_host,
+            port=settings.qdrant_port,
+            check_compatibility=False,
+        )
+        logger.info(
+            "Connected to Async Qdrant at %s:%s",
+            settings.qdrant_host,
+            settings.qdrant_port,
+        )
+    return _qdrant_async_client
 
 
 def get_embed_model() -> HuggingFaceEmbedding:
@@ -50,7 +73,11 @@ def get_embed_model() -> HuggingFaceEmbedding:
     global _embed_model
     if _embed_model is None:
         settings = get_settings()
-        logger.info("Loading embedding model '%s' on device '%s'...", settings.embedding_model, settings.embedding_device)
+        logger.info(
+            "Loading embedding model '%s' on device '%s'...",
+            settings.embedding_model,
+            settings.embedding_device,
+        )
         _embed_model = HuggingFaceEmbedding(
             model_name=settings.embedding_model,
             device=settings.embedding_device,
@@ -60,9 +87,18 @@ def get_embed_model() -> HuggingFaceEmbedding:
 
 
 def _get_vector_store() -> QdrantVectorStore:
-    """Get Qdrant vector store for the exam documents collection."""
+    """Get Qdrant vector store for the exam documents collection (sync)."""
     return QdrantVectorStore(
         client=get_qdrant_client(),
+        collection_name=COLLECTION_NAME,
+    )
+
+
+async def _get_async_vector_store() -> QdrantVectorStore:
+    """Get Qdrant vector store for the exam documents collection (async)."""
+    aclient = await get_qdrant_async_client()
+    return QdrantVectorStore(
+        aclient=aclient,
         collection_name=COLLECTION_NAME,
     )
 
@@ -114,7 +150,10 @@ async def embed_document(
         chunk_count = len(index.docstore.docs)
         logger.info(
             "Embedded document doc_id=%s (exam_id=%s, type=%s): %d chunks",
-            doc_id, exam_id, doc_type, chunk_count,
+            doc_id,
+            exam_id,
+            doc_type,
+            chunk_count,
         )
         return chunk_count
 

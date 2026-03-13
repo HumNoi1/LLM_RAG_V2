@@ -9,20 +9,25 @@ Pipeline per question:
   4. Call Groq llama-3.3-70b-versatile
   5. Parse JSON response → score + reasoning
 """
+
 import asyncio
 import json
 import logging
 import re
 from uuid import UUID
 
-from llama_index.core import Settings
+from llama_index.core import Settings, VectorStoreIndex
 from llama_index.core.llms import ChatMessage
 from llama_index.core.vector_stores import MetadataFilter, MetadataFilters
 from llama_index.llms.groq import Groq
 
 from app.config import get_settings
 from app.core.exceptions import LLMException
-from app.services.embedding_service import get_embed_model, get_index_for_exam
+from app.services.embedding_service import (
+    get_embed_model,
+    get_index_for_exam,
+    _get_async_vector_store,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -98,7 +103,9 @@ async def _call_llm_with_retry(llm: Groq, messages: list[ChatMessage]) -> str:
             if is_rate_limit and attempt < _GROQ_MAX_RETRIES - 1:
                 logger.warning(
                     "Groq rate limit hit, retrying in %ds (attempt %d/%d)",
-                    delay, attempt + 1, _GROQ_MAX_RETRIES,
+                    delay,
+                    attempt + 1,
+                    _GROQ_MAX_RETRIES,
                 )
                 await asyncio.sleep(delay)
                 delay *= 2
@@ -117,7 +124,9 @@ async def retrieve_context(
     """
     Settings.embed_model = get_embed_model()
 
-    index = get_index_for_exam(exam_id)
+    # Use async vector store for async retrieval
+    vector_store = await _get_async_vector_store()
+    index = VectorStoreIndex.from_vector_store(vector_store=vector_store)
 
     # Build retriever with metadata filter for this exam
     retriever = index.as_retriever(
@@ -130,7 +139,11 @@ async def retrieve_context(
     nodes = await retriever.aretrieve(question_text)
 
     if not nodes:
-        logger.warning("No context chunks found for exam_id=%s, query='%s'", exam_id, question_text[:50])
+        logger.warning(
+            "No context chunks found for exam_id=%s, query='%s'",
+            exam_id,
+            question_text[:50],
+        )
         return "(ไม่พบเนื้อหาอ้างอิง)"
 
     # Concatenate chunk texts with metadata hints
@@ -173,7 +186,9 @@ async def query_for_grading(
 
         # 3. Call Groq LLM with retry on rate limit
         llm = _get_groq_llm()
-        raw_response = await _call_llm_with_retry(llm, [ChatMessage(role="user", content=prompt)])
+        raw_response = await _call_llm_with_retry(
+            llm, [ChatMessage(role="user", content=prompt)]
+        )
 
         logger.debug("LLM response for exam=%s: %s", exam_id, raw_response[:200])
 
