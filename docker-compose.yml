@@ -1,9 +1,13 @@
 # Docker Compose — LLM RAG Exam Grading
+# Sprint 4 BE-S: Production-ready configuration
 #
-# Sprint 1: Qdrant only (backend + frontend run locally)
+# Development (Qdrant only — backend + frontend run locally):
 #   docker compose up -d
 #
-# Sprint 4: Full stack (after Dockerfiles are ready)
+# Full stack development (with hot-reload):
+#   docker compose --profile dev up -d
+#
+# Production:
 #   docker compose --profile full up -d
 
 services:
@@ -17,6 +21,9 @@ services:
       - qdrant_storage:/qdrant/storage
     environment:
       QDRANT__SERVICE__GRPC_PORT: "6334"
+      # Sprint 4: Production optimizations สำหรับ Qdrant
+      QDRANT__STORAGE__OPTIMIZERS__DEFAULT_SEGMENT_NUMBER: "2"
+      QDRANT__STORAGE__PERFORMANCE__MAX_SEARCH_THREADS: "0"
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:6333/healthz || exit 1"]
       interval: 30s
@@ -25,7 +32,33 @@ services:
       start_period: 15s
     restart: unless-stopped
 
-  # ── Uncomment below in Sprint 4 after Dockerfiles are ready ──────────────
+  # ── Development mode: backend with hot-reload ───────────────────────────────
+
+  backend-dev:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: rag_backend_dev
+    ports:
+      - "8000:8000"
+    env_file:
+      - ./backend/.env
+    environment:
+      QDRANT_HOST: qdrant
+      APP_ENV: development
+    volumes:
+      - ./backend:/app                              # Hot-reload: mount source code
+      - model_cache:/root/.cache/huggingface         # Persist BGE-M3 model download
+      - backend_uploads:/app/uploads                 # Persist uploaded PDFs
+    # Override CMD for dev mode (with --reload)
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    depends_on:
+      qdrant:
+        condition: service_healthy
+    restart: unless-stopped
+    profiles: ["dev"]
+
+  # ── Production mode: backend without hot-reload ─────────────────────────────
 
   backend:
     build:
@@ -37,16 +70,25 @@ services:
     env_file:
       - ./backend/.env
     environment:
-      # Override QDRANT_HOST to use Docker service name instead of localhost
       QDRANT_HOST: qdrant
+      APP_ENV: production
     volumes:
-      - ./backend:/app
-      - model_cache:/root/.cache/huggingface   # persist BGE-M3 model download
+      - model_cache:/root/.cache/huggingface         # Persist BGE-M3 model download
+      - backend_uploads:/app/uploads                 # Persist uploaded PDFs
+    # Production CMD (from Dockerfile — no --reload, 2 workers)
     depends_on:
       qdrant:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s  # BGE-M3 model loading takes time on first request
     restart: unless-stopped
     profiles: ["full"]
+
+  # ── Frontend ────────────────────────────────────────────────────────────────
 
   frontend:
     build:
@@ -64,4 +106,5 @@ services:
 
 volumes:
   qdrant_storage:
-  model_cache:    # shared BGE-M3 model cache across rebuilds
+  model_cache:           # Shared BGE-M3 model cache across rebuilds
+  backend_uploads:       # Persistent storage for uploaded PDF files

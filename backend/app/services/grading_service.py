@@ -1,3 +1,9 @@
+"""
+Grading Service — orchestrate background grading pipeline.
+BE-S responsibility (Sprint 3).
+Sprint 4: Graceful error handling, structured logging, per-question error recovery.
+"""
+
 import asyncio
 import logging
 import re
@@ -9,6 +15,7 @@ from typing import Optional
 from app.database import db
 from app.services.rag_service import query_for_grading
 from app.config import get_settings
+from app.core.exceptions import LLMException, GroqTimeoutException
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +30,7 @@ class GradingProgress:
     failed: int = 0
     status: str = "idle"
     error_message: Optional[str] = None
+    errors: list[str] = field(default_factory=list)  # Sprint 4: เก็บ error details
 
 
 _grading_progress: dict[uuid.UUID, GradingProgress] = {}
@@ -117,10 +125,10 @@ async def split_answer_by_llm(
     """Fallback: Use LLM to split student answer by questions.
 
     This is more expensive but handles complex formats.
+    Sprint 4: เพิ่ม timeout handling สำหรับ LLM call
     """
     from llama_index.llms.groq import Groq
     from llama_index.core.llms import ChatMessage
-    from app.core.exceptions import LLMException
 
     settings = get_settings()
     llm = Groq(
@@ -128,6 +136,7 @@ async def split_answer_by_llm(
         api_key=settings.groq_api_key,
         temperature=0.1,
         max_tokens=4096,
+        request_timeout=settings.llm_request_timeout,
     )
 
     prompt = f"""แยกคำตอบของนักเรียนออกเป็น {num_questions} ข้อ ตอบเป็น JSON เท่านั้น:
@@ -152,7 +161,15 @@ async def split_answer_by_llm(
 
         result = json.loads(response.message.content.strip())
         return {int(k): v for k, v in result.items()}
+
+    except asyncio.TimeoutError:
+        logger.error(f"LLM split timed out for exam {exam_id}")
+        raise GroqTimeoutException(settings.llm_request_timeout)
     except Exception as e:
+        error_str = str(e).lower()
+        if "timeout" in error_str or "timed out" in error_str:
+            logger.error(f"LLM split timed out for exam {exam_id}: {e}")
+            raise GroqTimeoutException(settings.llm_request_timeout) from e
         logger.error(f"LLM split failed: {e}")
         raise LLMException(f"Failed to split answer by LLM: {e}") from e
 
@@ -162,6 +179,12 @@ async def split_answer_by_llm(
 
 async def start_grading(exam_id: uuid.UUID) -> None:
     """Trigger background grading for all ungraded submissions in an exam.
+
+    Sprint 4: Graceful error handling improvements:
+      - Per-question error recovery (ข้อที่ grade ไม่สำเร็จจะถูกข้ามไป ไม่ทำให้ submission ทั้งหมดล้มเหลว)
+      - Timeout handling สำหรับ Groq API
+      - Structured logging ทุกขั้นตอน
+      - เก็บ error details ใน progress สำหรับ debugging
 
     Flow:
       1. Fetch all submissions with status 'parsed' for this exam
@@ -185,7 +208,7 @@ async def start_grading(exam_id: uuid.UUID) -> None:
         if not questions:
             progress.status = "failed"
             progress.error_message = "No questions found for this exam"
-            logger.error(f"Grading failed for exam {exam_id}: no questions")
+            logger.error("Grading failed for exam %s: no questions", exam_id)
             return
 
         num_questions = len(questions)
@@ -202,16 +225,22 @@ async def start_grading(exam_id: uuid.UUID) -> None:
             progress.status = "completed"
             progress.total = 0
             progress.completed = 0
-            logger.info(f"No submissions to grade for exam {exam_id}")
+            logger.info("No submissions to grade for exam %s", exam_id)
             return
 
         progress.total = len(submissions)
         logger.info(
-            f"Starting grading for {len(submissions)} submissions, {num_questions} questions"
+            "Starting grading for %d submissions, %d questions (exam=%s)",
+            len(submissions),
+            num_questions,
+            exam_id,
         )
 
         # 3. Grade each submission
         for submission in submissions:
+            submission_errors: list[str] = []
+            graded_count = 0
+
             try:
                 # Update submission status to grading
                 await db.studentsubmission.update(
@@ -224,31 +253,81 @@ async def start_grading(exam_id: uuid.UUID) -> None:
                     where={"id": submission.studentId}
                 )
                 student_name = student.fullName if student else "Unknown"
+                logger.info(
+                    "Grading submission for student '%s' (submission=%s)",
+                    student_name,
+                    submission.id,
+                )
 
                 # Split answer text by question
                 parsed_text = submission.parsedText or ""
+
+                if not parsed_text.strip():
+                    logger.warning(
+                        "Empty parsed text for submission %s, skipping",
+                        submission.id,
+                    )
+                    submission_errors.append(
+                        "Empty parsed text — ไม่มีข้อความในไฟล์ที่ parse ได้"
+                    )
+                    await db.studentsubmission.update(
+                        where={"id": submission.id},
+                        data={"status": "graded"},
+                    )
+                    progress.completed += 1
+                    continue
+
                 answers = split_answer_by_question(parsed_text, num_questions)
 
                 # If split failed, try LLM fallback
                 if len(answers) < num_questions:
                     logger.warning(
-                        f"Split returned {len(answers)} parts, trying LLM fallback"
+                        "Split returned %d parts (expected %d), trying LLM fallback",
+                        len(answers),
+                        num_questions,
                     )
                     try:
                         answers = await split_answer_by_llm(
                             parsed_text, num_questions, exam_id
                         )
-                    except Exception as e:
-                        logger.error(f"LLM split fallback failed: {e}")
+                    except (LLMException, GroqTimeoutException) as e:
+                        err_msg = f"LLM split fallback failed: {e.message}"
+                        logger.error(err_msg)
+                        submission_errors.append(err_msg)
+                        # ใช้ answers เดิมจาก regex split ต่อไป ไม่ให้ fail ทั้งหมด
 
-                # Grade each question
+                # Grade each question — per-question error recovery
                 for question in questions:
                     question_num = question.questionNumber
                     student_answer = answers.get(question_num, "")
 
                     # Skip if no answer for this question
                     if not student_answer.strip():
-                        logger.info(f"No answer for Q{question_num}, skipping")
+                        logger.info(
+                            "No answer for Q%d (student=%s), saving score=0",
+                            question_num,
+                            student_name,
+                        )
+                        # Sprint 4: บันทึก score=0 สำหรับข้อที่ไม่มีคำตอบ แทนที่จะข้ามไป
+                        try:
+                            await db.gradingresult.create(
+                                data={
+                                    "id": str(uuid.uuid4()),
+                                    "submissionId": submission.id,
+                                    "questionId": question.id,
+                                    "studentAnswerText": "(ไม่มีคำตอบ)",
+                                    "llmScore": 0.0,
+                                    "llmMaxScore": question.maxScore,
+                                    "llmReasoning": "ไม่พบคำตอบของนักเรียนสำหรับข้อนี้",
+                                    "llmModelUsed": settings.llm_model,
+                                    "status": "pending_review",
+                                    "gradedAt": datetime.now(timezone.utc),
+                                }
+                            )
+                        except Exception as save_err:
+                            logger.error(
+                                "Failed to save empty answer result: %s", save_err
+                            )
                         continue
 
                     try:
@@ -261,7 +340,7 @@ async def start_grading(exam_id: uuid.UUID) -> None:
                         )
 
                         # Save grading result
-                        grading_result = await db.gradingresult.create(
+                        await db.gradingresult.create(
                             data={
                                 "id": str(uuid.uuid4()),
                                 "submissionId": submission.id,
@@ -276,34 +355,76 @@ async def start_grading(exam_id: uuid.UUID) -> None:
                             }
                         )
 
+                        graded_count += 1
                         logger.debug(
-                            f"Graded Q{question_num} for {student_name}: {result['score']}/{question.maxScore}"
+                            "Graded Q%d for %s: %.1f/%s",
+                            question_num,
+                            student_name,
+                            result["score"],
+                            question.maxScore,
                         )
 
-                    except Exception as e:
-                        logger.error(f"Failed to grade Q{question_num}: {e}")
+                    except GroqTimeoutException as e:
+                        # Sprint 4: Timeout — บันทึก error แต่ไม่หยุด submission ทั้งหมด
+                        err_msg = f"Q{question_num} timeout: {e.message}"
+                        logger.error(err_msg)
+                        submission_errors.append(err_msg)
                         progress.failed += 1
                         continue
 
-                # Mark submission as graded
+                    except LLMException as e:
+                        # Sprint 4: LLM error — บันทึก error แต่ไม่หยุด submission ทั้งหมด
+                        err_msg = f"Q{question_num} LLM error: {e.message}"
+                        logger.error(err_msg)
+                        submission_errors.append(err_msg)
+                        progress.failed += 1
+                        continue
+
+                    except Exception as e:
+                        err_msg = f"Q{question_num} unexpected error: {str(e)}"
+                        logger.error(err_msg, exc_info=True)
+                        submission_errors.append(err_msg)
+                        progress.failed += 1
+                        continue
+
+                # Mark submission as graded (แม้จะมีบาง question ที่ fail)
+                final_status = "graded" if graded_count > 0 else "failed"
                 await db.studentsubmission.update(
                     where={"id": submission.id},
-                    data={"status": "graded"},
+                    data={"status": final_status},
                 )
 
                 progress.completed += 1
-                logger.info(
-                    f"Graded submission {progress.completed}/{len(submissions)}"
-                )
+
+                if submission_errors:
+                    progress.errors.extend(submission_errors)
+                    logger.warning(
+                        "Graded submission %s with %d errors: %d/%d questions succeeded",
+                        submission.id,
+                        len(submission_errors),
+                        graded_count,
+                        num_questions,
+                    )
+                else:
+                    logger.info(
+                        "Graded submission %d/%d (%s): all %d questions OK",
+                        progress.completed,
+                        len(submissions),
+                        student_name,
+                        graded_count,
+                    )
 
             except Exception as e:
-                logger.error(f"Failed to grade submission {submission.id}: {e}")
+                err_msg = f"Submission {submission.id} failed: {str(e)}"
+                logger.error(err_msg, exc_info=True)
                 progress.failed += 1
-                # Mark submission as graded anyway to not block (with failed status)
+                progress.errors.append(err_msg)
+
+                # Mark submission as failed
                 try:
                     await db.studentsubmission.update(
                         where={"id": submission.id},
-                        data={"status": "graded"},
+                        data={"status": "failed"},
                     )
                 except Exception:
                     pass
@@ -312,11 +433,16 @@ async def start_grading(exam_id: uuid.UUID) -> None:
         # 4. Finalize
         progress.status = "completed"
         logger.info(
-            f"Grading completed for exam {exam_id}: {progress.completed} success, {progress.failed} failed"
+            "Grading completed for exam %s: %d/%d success, %d question-level failures, %d errors",
+            exam_id,
+            progress.completed,
+            progress.total,
+            progress.failed,
+            len(progress.errors),
         )
 
     except Exception as e:
-        logger.error(f"Grading failed for exam {exam_id}: {e}")
+        logger.error("Grading failed for exam %s: %s", exam_id, e, exc_info=True)
         progress.status = "failed"
         progress.error_message = str(e)
         raise
@@ -335,7 +461,7 @@ async def get_grading_status(exam_id: uuid.UUID) -> dict:
             where={"examId": str(exam_id)}
         )
         total = len(submissions)
-        completed = len([s for s in submissions if s.status == "graded"])
+        completed = len([s for s in submissions if s.status in ("graded", "failed")])
 
         if total == 0:
             return {

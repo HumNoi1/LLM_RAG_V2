@@ -3,6 +3,7 @@ from fastapi import HTTPException, status
 
 class AppException(Exception):
     """Base application exception."""
+
     def __init__(self, message: str, status_code: int = 500):
         self.message = message
         self.status_code = status_code
@@ -47,6 +48,7 @@ class ServiceUnavailableException(AppException):
 
 # ── Grading-specific exceptions ───────────────────────────────────────────────
 
+
 class GradingInProgressException(AppException):
     def __init__(self, exam_id: str):
         super().__init__(
@@ -56,7 +58,10 @@ class GradingInProgressException(AppException):
 
 
 class PDFParseException(AppException):
+    """Sprint 4: เพิ่ม filename attribute สำหรับ logging ที่ดีขึ้น"""
+
     def __init__(self, filename: str, reason: str = ""):
+        self.filename = filename
         msg = f"Failed to parse PDF '{filename}'"
         if reason:
             msg += f": {reason}"
@@ -71,6 +76,28 @@ class EmbeddingException(AppException):
 class LLMException(AppException):
     def __init__(self, message: str):
         super().__init__(f"LLM error: {message}", status.HTTP_502_BAD_GATEWAY)
+
+
+class GroqTimeoutException(LLMException):
+    """Sprint 4: เฉพาะเจาะจงสำหรับ Groq API timeout — ให้ client รู้ว่าควร retry"""
+
+    def __init__(self, timeout_seconds: int = 60):
+        super().__init__(
+            f"Groq API request timed out after {timeout_seconds}s. "
+            "Please try again later."
+        )
+        self.timeout_seconds = timeout_seconds
+
+
+class GroqRateLimitException(LLMException):
+    """Sprint 4: เฉพาะเจาะจงสำหรับ Groq rate limit — ให้ client รู้ว่าต้องรอ"""
+
+    def __init__(self, retry_after: int | None = None):
+        msg = "Groq API rate limit exceeded."
+        if retry_after:
+            msg += f" Retry after {retry_after}s."
+        super().__init__(msg)
+        self.retry_after = retry_after
 
 
 def to_http_exception(exc: AppException) -> HTTPException:

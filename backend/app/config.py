@@ -55,6 +55,21 @@ class Settings(BaseSettings):
         default="BAAI/bge-m3", validation_alias="EMBEDDING_MODEL"
     )
     embedding_device: str = Field(default="cpu", validation_alias="EMBEDDING_DEVICE")
+    embedding_batch_size: int = Field(
+        default=32, validation_alias="EMBEDDING_BATCH_SIZE"
+    )
+    embedding_chunk_size: int = Field(
+        default=512, validation_alias="EMBEDDING_CHUNK_SIZE"
+    )
+    embedding_chunk_overlap: int = Field(
+        default=50, validation_alias="EMBEDDING_CHUNK_OVERLAP"
+    )
+
+    # ── Qdrant query params ──────────────────────────────────────
+    qdrant_top_k: int = Field(default=5, validation_alias="QDRANT_TOP_K")
+    qdrant_score_threshold: float = Field(
+        default=0.3, validation_alias="QDRANT_SCORE_THRESHOLD"
+    )
 
     # ── LLM ──────────────────────────────────────────────────────
     llm_model: str = Field(
@@ -62,6 +77,11 @@ class Settings(BaseSettings):
     )
     llm_temperature: float = Field(default=0.1, validation_alias="LLM_TEMPERATURE")
     llm_max_tokens: int = Field(default=4096, validation_alias="LLM_MAX_TOKENS")
+    llm_request_timeout: int = Field(default=60, validation_alias="LLM_REQUEST_TIMEOUT")
+    llm_max_retries: int = Field(default=3, validation_alias="LLM_MAX_RETRIES")
+    llm_retry_base_delay: int = Field(
+        default=2, validation_alias="LLM_RETRY_BASE_DELAY"
+    )
 
     @property
     def secret_key(self) -> str:

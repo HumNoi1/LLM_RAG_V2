@@ -1,0 +1,43 @@
+# Sprint 4 BE-S: Docker ignore file เพื่อลดขนาด build context
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Git
+.git/
+.gitignore
+
+# Tests
+tests/
+poc/
+*.test.py
+pytest.ini
+
+# Environment files (ไม่ copy .env เข้า image — ใช้ docker-compose env_file แทน)
+.env
+.env.*
+
+# Uploads (mount volume แทน)
+uploads/
+
+# Misc
+*.md
+LICENSE
+.python-version

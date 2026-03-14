@@ -39,6 +39,11 @@ router = APIRouter()
 # Upload directory (relative to backend root)
 UPLOAD_DIR = Path("uploads")
 
+# ── ค่า response สำหรับ error ที่ใช้ร่วมกัน ──────────────────────────────────
+_auth_error = {
+    401: {"model": schemas.ErrorResponse, "description": "ไม่ได้ login หรือ token หมดอายุ"}
+}
+
 
 def _get_upload_dir(exam_id: UUID, sub: str = "documents") -> Path:
     """Return and ensure upload directory exists."""
@@ -102,16 +107,41 @@ async def _process_and_embed_document(
 # ── Reference documents (answer key / rubric / course material) ───────────────
 
 
-@router.post("/upload", response_model=schemas.DocumentUploadResponse, status_code=202)
+@router.post(
+    "/upload",
+    response_model=schemas.DocumentUploadResponse,
+    status_code=202,
+    summary="อัปโหลดเอกสารอ้างอิง (เฉลย/rubric/เนื้อหาวิชา)",
+    responses={
+        **_auth_error,
+        400: {
+            "model": schemas.ErrorResponse,
+            "description": "ไฟล์ไม่ใช่ PDF หรือขนาดเกิน 50MB",
+        },
+        404: {"model": schemas.ErrorResponse, "description": "ไม่พบข้อสอบที่ระบุ"},
+    },
+)
 async def upload_reference_document(
-    exam_id: UUID = Form(...),
-    doc_type: schemas.DocType = Form(...),
-    file: UploadFile = File(..., description="PDF only"),
+    exam_id: UUID = Form(..., description="UUID ของข้อสอบที่เอกสารนี้สังกัด"),
+    doc_type: schemas.DocType = Form(
+        ..., description="ประเภทเอกสาร: answer_key, rubric, หรือ course_material"
+    ),
+    file: UploadFile = File(..., description="ไฟล์ PDF เท่านั้น (สูงสุด 50MB)"),
     background_tasks: BackgroundTasks = BackgroundTasks(),
     current_user: Annotated[dict, Depends(get_current_user)] = None,
 ):
-    """Upload a reference PDF (answer key / rubric / course material).
-    Parsing and embedding run asynchronously via BackgroundTasks.
+    """อัปโหลดเอกสาร PDF เป็นข้อมูลอ้างอิงสำหรับการตรวจข้อสอบ
+
+    **ขั้นตอนการทำงาน (async):**
+    1. บันทึกไฟล์ลง disk
+    2. สร้าง record ใน DB (status = `pending`)
+    3. ส่ง background task: parse PDF → chunk text → embed ลง Qdrant vector DB
+    4. เมื่อเสร็จแล้ว status จะเปลี่ยนเป็น `completed` หรือ `failed`
+
+    **ประเภทเอกสาร:**
+    - `answer_key` — เฉลยข้อสอบ
+    - `rubric` — เกณฑ์การให้คะแนน
+    - `course_material` — เนื้อหาวิชาประกอบ
     """
     # Validate file type
     if not file.filename or not file.filename.lower().endswith(".pdf"):
@@ -185,13 +215,25 @@ async def upload_reference_document(
     )
 
 
-@router.get("", response_model=schemas.DocumentListResponse)
+@router.get(
+    "",
+    response_model=schemas.DocumentListResponse,
+    summary="ดูรายการเอกสารของข้อสอบ",
+    responses={
+        **_auth_error,
+        404: {"model": schemas.ErrorResponse, "description": "ไม่พบข้อสอบที่ระบุ"},
+    },
+)
 async def list_documents(
     exam_id: UUID,
     current_user: Annotated[dict, Depends(get_current_user)] = None,
 ):
-    """List all documents for an exam with their embedding status.
-    BE-J: implement in Sprint 2.
+    """ดึงรายการเอกสารทั้งหมดของข้อสอบ พร้อม embedding status
+
+    - ใช้ query parameter `exam_id` เพื่อกรองตามข้อสอบ
+    - แต่ละเอกสารจะแสดง `embedding_status` (pending/processing/completed/failed)
+
+    **สถานะ:** BE-J implement ใน Sprint 2
     """
     raise NotImplementedError
 
@@ -199,26 +241,54 @@ async def list_documents(
 # ── Student submissions ───────────────────────────────────────────────────────
 
 
-@router.post("/submissions/upload", status_code=202)
+@router.post(
+    "/submissions/upload",
+    status_code=202,
+    summary="อัปโหลดกระดาษคำตอบนักศึกษา",
+    responses={
+        **_auth_error,
+        400: {"model": schemas.ErrorResponse, "description": "ไฟล์ไม่ใช่ PDF"},
+        404: {"model": schemas.ErrorResponse, "description": "ไม่พบข้อสอบหรือนักศึกษาที่ระบุ"},
+    },
+)
 async def upload_student_submission(
-    exam_id: UUID = Form(...),
-    student_id: UUID = Form(...),
-    file: UploadFile = File(..., description="PDF only"),
+    exam_id: UUID = Form(..., description="UUID ของข้อสอบ"),
+    student_id: UUID = Form(..., description="UUID ของนักศึกษา"),
+    file: UploadFile = File(..., description="กระดาษคำตอบ PDF"),
     background_tasks: BackgroundTasks = BackgroundTasks(),
     current_user: Annotated[dict, Depends(get_current_user)] = None,
 ):
-    """Upload a student answer PDF. Parses text asynchronously.
-    BE-J: implement in Sprint 2.
+    """อัปโหลด PDF กระดาษคำตอบของนักศึกษา
+
+    **ขั้นตอนการทำงาน (async):**
+    1. บันทึกไฟล์ลง disk
+    2. สร้าง submission record (status = `uploaded`)
+    3. Background task: parse PDF → เก็บ parsed text
+    4. Status เปลี่ยนเป็น `parsed` เมื่อเสร็จ
+
+    **สถานะ:** BE-J implement ใน Sprint 2
     """
     raise NotImplementedError
 
 
-@router.get("/submissions", response_model=schemas.SubmissionListResponse)
+@router.get(
+    "/submissions",
+    response_model=schemas.SubmissionListResponse,
+    summary="ดูรายการกระดาษคำตอบของข้อสอบ",
+    responses={
+        **_auth_error,
+        404: {"model": schemas.ErrorResponse, "description": "ไม่พบข้อสอบที่ระบุ"},
+    },
+)
 async def list_submissions(
     exam_id: UUID,
     current_user: Annotated[dict, Depends(get_current_user)] = None,
 ):
-    """List all student submissions for an exam.
-    BE-J: implement in Sprint 2.
+    """ดึงรายการ submission ทั้งหมดของข้อสอบ
+
+    - ใช้ query parameter `exam_id` เพื่อกรองตามข้อสอบ
+    - แสดงข้อมูลนักศึกษา, สถานะ, และสรุปคะแนน
+
+    **สถานะ:** BE-J implement ใน Sprint 2
     """
     raise NotImplementedError

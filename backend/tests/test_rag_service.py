@@ -182,9 +182,11 @@ class TestRetrieveContext:
         node1 = MagicMock()
         node1.text = "เฉลย: พืชสังเคราะห์แสงโดยใช้ CO2"
         node1.metadata = {"doc_type": "answer_key"}
+        node1.score = 0.85
         node2 = MagicMock()
         node2.text = "Rubric: ต้องระบุวัตถุดิบ"
         node2.metadata = {"doc_type": "rubric"}
+        node2.score = 0.72
 
         mock_retriever = MagicMock()
         mock_retriever.aretrieve = AsyncMock(return_value=[node1, node2])
@@ -310,14 +312,73 @@ class TestCallLlmWithRetry:
 
         assert llm.chat.call_count == 3  # all retries exhausted
 
-    async def test_does_not_retry_non_rate_limit_error(self):
-        """Non-429 errors should raise immediately without any retry."""
+    async def test_does_not_retry_non_retryable_error(self):
+        """Non-retryable errors should raise immediately without any retry."""
         from app.services.rag_service import _call_llm_with_retry
 
         llm = MagicMock()
-        llm.chat.side_effect = RuntimeError("Connection refused")
+        llm.chat.side_effect = RuntimeError("Invalid API key")
 
-        with pytest.raises(RuntimeError, match="Connection refused"):
+        with pytest.raises(RuntimeError, match="Invalid API key"):
             await _call_llm_with_retry(llm, [ChatMessage(role="user", content="test")])
 
         assert llm.chat.call_count == 1  # no retries
+
+    @patch("asyncio.sleep", new_callable=AsyncMock)
+    async def test_retries_on_timeout(self, mock_sleep):
+        """Sprint 4: Should retry on timeout errors."""
+        from app.services.rag_service import _call_llm_with_retry
+
+        llm = MagicMock()
+        response = MagicMock()
+        response.message.content = '{"score": 5.0}'
+        llm.chat.side_effect = [RuntimeError("Request timed out"), response]
+
+        result = await _call_llm_with_retry(
+            llm, [ChatMessage(role="user", content="test")]
+        )
+
+        assert result == '{"score": 5.0}'
+        assert llm.chat.call_count == 2
+        mock_sleep.assert_awaited_once()
+
+    @patch("asyncio.sleep", new_callable=AsyncMock)
+    async def test_retries_on_connection_error(self, mock_sleep):
+        """Sprint 4: Should retry on connection errors."""
+        from app.services.rag_service import _call_llm_with_retry
+
+        llm = MagicMock()
+        response = MagicMock()
+        response.message.content = '{"score": 3.0}'
+        llm.chat.side_effect = [RuntimeError("Connection refused"), response]
+
+        result = await _call_llm_with_retry(
+            llm, [ChatMessage(role="user", content="test")]
+        )
+
+        assert result == '{"score": 3.0}'
+        assert llm.chat.call_count == 2
+
+
+# ── Tests: _parse_json_from_response (Sprint 4 additions) ────────────────────
+
+
+class TestParseJsonFromResponseSprint4:
+    """Sprint 4: ทดสอบ JSON parsing เพิ่มเติมสำหรับ edge cases ที่เจอจาก LLM จริง"""
+
+    def test_json_in_markdown_code_block(self):
+        """LLM อาจห่อ JSON ด้วย markdown code block"""
+        raw = '```json\n{"score": 8.0, "reasoning": "Good"}\n```'
+        result = _parse_json_from_response(raw)
+        assert result["score"] == 8.0
+
+    def test_json_with_newlines_in_values(self):
+        raw = '{"score": 7.5, "reasoning": "ตอบได้ดี\\nแต่ขาดรายละเอียด"}'
+        result = _parse_json_from_response(raw)
+        assert result["score"] == 7.5
+
+    def test_json_with_empty_arrays(self):
+        raw = '{"score": 10, "reasoning": "Perfect", "covered_points": [], "missed_points": []}'
+        result = _parse_json_from_response(raw)
+        assert result["covered_points"] == []
+        assert result["missed_points"] == []

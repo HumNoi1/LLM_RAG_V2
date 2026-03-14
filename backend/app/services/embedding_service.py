@@ -1,15 +1,18 @@
 """
 Embedding Service — BGE-M3 embeddings + Qdrant vector store.
 BE-S responsibility (Sprint 2).
+Sprint 4: Performance tuning — configurable batch size, chunk params, Qdrant query params.
 
 Key design decisions:
   - Model: BAAI/bge-m3 (multilingual, strong Thai support)
-  - Chunking: SentenceSplitter(chunk_size=512, chunk_overlap=50)
+  - Chunking: SentenceSplitter with configurable chunk_size / chunk_overlap
+  - Batch processing: configurable embed_batch_size for large documents
   - Metadata: exam_id, doc_type tagged on every node
   - Filter by metadata at query time
 """
 
 import logging
+import time
 from typing import Optional
 from uuid import UUID
 
@@ -81,8 +84,11 @@ def get_embed_model() -> HuggingFaceEmbedding:
         _embed_model = HuggingFaceEmbedding(
             model_name=settings.embedding_model,
             device=settings.embedding_device,
+            embed_batch_size=settings.embedding_batch_size,
         )
-        logger.info("Embedding model loaded")
+        logger.info(
+            "Embedding model loaded (batch_size=%d)", settings.embedding_batch_size
+        )
     return _embed_model
 
 
@@ -111,20 +117,29 @@ async def embed_document(
 ) -> int:
     """Embed document text and store chunks in Qdrant.
 
+    Sprint 4: ใช้ configurable chunk_size, chunk_overlap, และ embed_batch_size
+    จาก Settings เพื่อให้ปรับ performance ได้ผ่าน environment variables.
+
     Args:
-        exam_id:  UUID of the exam this document belongs to.
-        doc_id:   UUID of the document record (for tracking).
+        exam_id:  UUID ของข้อสอบที่เอกสารนี้เป็นของ
+        doc_id:   UUID ของ document record (สำหรับ tracking)
         doc_type: 'answer_key' | 'rubric' | 'course_material'
-        text:     Full extracted text from the PDF.
+        text:     ข้อความเต็มที่ extract จาก PDF
 
     Returns:
-        Number of chunks embedded.
+        จำนวน chunks ที่ embed แล้ว
     """
+    settings = get_settings()
+    start_time = time.time()
+
     try:
-        # Configure LlamaIndex settings for this operation
+        # Configure LlamaIndex settings — ใช้ค่าจาก config แทน hardcode
         embed_model = get_embed_model()
         Settings.embed_model = embed_model
-        Settings.node_parser = SentenceSplitter(chunk_size=512, chunk_overlap=50)
+        Settings.node_parser = SentenceSplitter(
+            chunk_size=settings.embedding_chunk_size,
+            chunk_overlap=settings.embedding_chunk_overlap,
+        )
 
         # Create a LlamaIndex Document with metadata
         doc = Document(
@@ -148,17 +163,26 @@ async def embed_document(
 
         # Count chunks that were created
         chunk_count = len(index.docstore.docs)
+        elapsed = time.time() - start_time
         logger.info(
-            "Embedded document doc_id=%s (exam_id=%s, type=%s): %d chunks",
+            "Embedded document doc_id=%s (exam_id=%s, type=%s): %d chunks in %.2fs "
+            "(chunk_size=%d, overlap=%d, batch_size=%d)",
             doc_id,
             exam_id,
             doc_type,
             chunk_count,
+            elapsed,
+            settings.embedding_chunk_size,
+            settings.embedding_chunk_overlap,
+            settings.embedding_batch_size,
         )
         return chunk_count
 
     except Exception as e:
-        logger.error("Embedding failed for doc_id=%s: %s", doc_id, e)
+        elapsed = time.time() - start_time
+        logger.error(
+            "Embedding failed for doc_id=%s after %.2fs: %s", doc_id, elapsed, e
+        )
         raise EmbeddingException(str(e)) from e
 
 
