@@ -18,16 +18,16 @@ from uuid import UUID
 
 from llama_index.core import Settings, VectorStoreIndex
 from llama_index.core.llms import ChatMessage
-from llama_index.core.vector_stores import MetadataFilter, MetadataFilters
+from llama_index.core.vector_stores import (
+    FilterOperator,
+    MetadataFilter,
+    MetadataFilters,
+)
 from llama_index.llms.groq import Groq
 
 from app.config import get_settings
 from app.core.exceptions import LLMException
-from app.services.embedding_service import (
-    get_embed_model,
-    get_index_for_exam,
-    _get_async_vector_store,
-)
+from app.services.embedding_service import get_embed_model, _get_async_vector_store
 
 logger = logging.getLogger(__name__)
 
@@ -97,7 +97,9 @@ async def _call_llm_with_retry(llm: Groq, messages: list[ChatMessage]) -> str:
     for attempt in range(_GROQ_MAX_RETRIES):
         try:
             response = await asyncio.to_thread(llm.chat, messages)
-            return response.message.content
+            if response.message.content is None:
+                raise ValueError("Empty response content from LLM")
+            return str(response.message.content)
         except Exception as e:
             is_rate_limit = "429" in str(e) or "rate limit" in str(e).lower()
             if is_rate_limit and attempt < _GROQ_MAX_RETRIES - 1:
@@ -111,6 +113,7 @@ async def _call_llm_with_retry(llm: Groq, messages: list[ChatMessage]) -> str:
                 delay *= 2
             else:
                 raise
+    raise RuntimeError("Failed to get LLM response after retries")
 
 
 async def retrieve_context(
@@ -128,11 +131,18 @@ async def retrieve_context(
     vector_store = await _get_async_vector_store()
     index = VectorStoreIndex.from_vector_store(vector_store=vector_store)
 
-    # Build retriever with metadata filter for this exam
+    # Build retriever with metadata filter for this exam and allowed document types
     retriever = index.as_retriever(
         similarity_top_k=top_k,
         filters=MetadataFilters(
-            filters=[MetadataFilter(key="exam_id", value=str(exam_id))]
+            filters=[
+                MetadataFilter(key="exam_id", value=str(exam_id)),
+                MetadataFilter(
+                    key="doc_type",
+                    value=["answer_key", "rubric", "course_material"],
+                    operator=FilterOperator.IN,
+                ),
+            ]
         ),
     )
 

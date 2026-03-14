@@ -1,6 +1,6 @@
 from functools import lru_cache
 
-from pydantic import Field
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -14,32 +14,66 @@ class Settings(BaseSettings):
 
     # ── App ──────────────────────────────────────────────────────
     app_env: str = "development"
-    secret_key: str = Field(default="dev-secret-key-change-in-production")
-    access_token_expire_minutes: int = 30
-    refresh_token_expire_days: int = 7
+    jwt_secret_key: str = Field(
+        default="dev-secret-key-change-in-production",
+        validation_alias=AliasChoices("JWT_SECRET_KEY", "SECRET_KEY"),
+    )
+    jwt_algorithm: str = Field(default="HS256", validation_alias="JWT_ALGORITHM")
+    jwt_access_token_expire_minutes: int = Field(
+        default=30,
+        validation_alias=AliasChoices(
+            "JWT_ACCESS_TOKEN_EXPIRE_MINUTES", "ACCESS_TOKEN_EXPIRE_MINUTES"
+        ),
+    )
+    jwt_refresh_token_expire_days: int = Field(
+        default=7,
+        validation_alias=AliasChoices(
+            "JWT_REFRESH_TOKEN_EXPIRE_DAYS", "REFRESH_TOKEN_EXPIRE_DAYS"
+        ),
+    )
 
     # ── Supabase ─────────────────────────────────────────────────
-    supabase_url: str = ""
-    supabase_key: str = ""
-    supabase_service_role_key: str = ""
-    database_url: str = ""
+    supabase_url: str = Field(default="", validation_alias="SUPABASE_URL")
+    supabase_key: str = Field(default="", validation_alias="SUPABASE_KEY")
+    supabase_service_role_key: str = Field(
+        default="", validation_alias="SUPABASE_SERVICE_ROLE_KEY"
+    )
+    database_url: str = Field(default="", validation_alias="DATABASE_URL")
 
     # ── Groq API ─────────────────────────────────────────────────
-    groq_api_key: str = ""
+    groq_api_key: str = Field(default="", validation_alias="GROQ_API_KEY")
 
     # ── Qdrant ───────────────────────────────────────────────────
-    qdrant_host: str = "localhost"
-    qdrant_port: int = 6333
-    qdrant_collection_name: str = "exam_documents"
+    qdrant_host: str = Field(default="localhost", validation_alias="QDRANT_HOST")
+    qdrant_port: int = Field(default=6333, validation_alias="QDRANT_PORT")
+    qdrant_collection_name: str = Field(
+        default="exam_documents", validation_alias="QDRANT_COLLECTION_NAME"
+    )
 
     # ── Embedding ────────────────────────────────────────────────
-    embedding_model: str = "BAAI/bge-m3"
-    embedding_device: str = "cpu"
+    embedding_model: str = Field(
+        default="BAAI/bge-m3", validation_alias="EMBEDDING_MODEL"
+    )
+    embedding_device: str = Field(default="cpu", validation_alias="EMBEDDING_DEVICE")
 
     # ── LLM ──────────────────────────────────────────────────────
-    llm_model: str = "llama-3.3-70b-versatile"
-    llm_temperature: float = 0.1
-    llm_max_tokens: int = 4096
+    llm_model: str = Field(
+        default="llama-3.3-70b-versatile", validation_alias="LLM_MODEL"
+    )
+    llm_temperature: float = Field(default=0.1, validation_alias="LLM_TEMPERATURE")
+    llm_max_tokens: int = Field(default=4096, validation_alias="LLM_MAX_TOKENS")
+
+    @property
+    def secret_key(self) -> str:
+        return self.jwt_secret_key
+
+    @property
+    def access_token_expire_minutes(self) -> int:
+        return self.jwt_access_token_expire_minutes
+
+    @property
+    def refresh_token_expire_days(self) -> int:
+        return self.jwt_refresh_token_expire_days
 
     @property
     def is_production(self) -> bool:

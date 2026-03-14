@@ -3,7 +3,7 @@ import logging
 import re
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from app.database import db
@@ -272,7 +272,7 @@ async def start_grading(exam_id: uuid.UUID) -> None:
                                 "llmReasoning": result["reasoning"],
                                 "llmModelUsed": settings.llm_model,
                                 "status": "pending_review",
-                                "gradedAt": datetime.utcnow(),
+                                "gradedAt": datetime.now(timezone.utc),
                             }
                         )
 

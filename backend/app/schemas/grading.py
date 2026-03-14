@@ -14,18 +14,20 @@ class GradingStatus(str, Enum):
 
 
 class GradingResultStatus(str, Enum):
-    pending = "pending"
+    pending_review = "pending_review"
     approved = "approved"
     revised = "revised"
 
 
 # ── Requests ──────────────────────────────────────────────────────────────────
 
+
 class GradingStartRequest(BaseModel):
     exam_id: UUID
 
 
 # ── Responses ─────────────────────────────────────────────────────────────────
+
 
 class GradingProgressResponse(BaseModel):
     exam_id: UUID

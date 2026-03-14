@@ -12,6 +12,7 @@ Tests:
   - retrieve_context: returns context text from mock retriever
   - retrieve_context: returns fallback text when no chunks found
 """
+
 import json
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -25,9 +26,15 @@ from app.services.rag_service import _parse_json_from_response
 
 # ── Tests: _parse_json_from_response ─────────────────────────────────────────
 
+
 class TestParseJsonFromResponse:
     def test_clean_json(self):
-        payload = {"score": 8.5, "reasoning": "Good answer", "covered_points": [], "missed_points": []}
+        payload = {
+            "score": 8.5,
+            "reasoning": "Good answer",
+            "covered_points": [],
+            "missed_points": [],
+        }
         result = _parse_json_from_response(json.dumps(payload))
         assert result["score"] == 8.5
         assert result["reasoning"] == "Good answer"
@@ -54,9 +61,9 @@ class TestParseJsonFromResponse:
 
 # ── Tests: query_for_grading ──────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 class TestQueryForGrading:
-
     @patch("app.services.rag_service._get_groq_llm")
     @patch("app.services.rag_service.retrieve_context")
     async def test_returns_score_and_reasoning(self, mock_retrieve, mock_get_llm):
@@ -66,12 +73,14 @@ class TestQueryForGrading:
         mock_retrieve.return_value = "เฉลย: พืชใช้แสงอาทิตย์ CO2 และน้ำ"
 
         llm_response = MagicMock()
-        llm_response.message.content = json.dumps({
-            "score": 8.0,
-            "reasoning": "ตอบถูกต้องส่วนใหญ่",
-            "covered_points": ["แสง", "CO2"],
-            "missed_points": ["น้ำ"],
-        })
+        llm_response.message.content = json.dumps(
+            {
+                "score": 8.0,
+                "reasoning": "ตอบถูกต้องส่วนใหญ่",
+                "covered_points": ["แสง", "CO2"],
+                "missed_points": ["น้ำ"],
+            }
+        )
         mock_llm = MagicMock()
         mock_llm.chat.return_value = llm_response
         mock_get_llm.return_value = mock_llm
@@ -96,7 +105,9 @@ class TestQueryForGrading:
 
         mock_retrieve.return_value = "context"
         llm_response = MagicMock()
-        llm_response.message.content = json.dumps({"score": 15.0, "reasoning": "Over full"})
+        llm_response.message.content = json.dumps(
+            {"score": 15.0, "reasoning": "Over full"}
+        )
         mock_llm = MagicMock()
         mock_llm.chat.return_value = llm_response
         mock_get_llm.return_value = mock_llm
@@ -153,13 +164,16 @@ class TestQueryForGrading:
 
 # ── Tests: retrieve_context ───────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 class TestRetrieveContext:
-
-    @patch("app.services.rag_service.get_index_for_exam")
+    @patch("app.services.rag_service.VectorStoreIndex")
+    @patch("app.services.rag_service._get_async_vector_store")
     @patch("app.services.rag_service.get_embed_model")
     @patch("app.services.rag_service.Settings")
-    async def test_returns_context_text(self, mock_settings, mock_embed, mock_get_index):
+    async def test_returns_context_text(
+        self, mock_settings, mock_embed, mock_get_async_store, mock_index_cls
+    ):
         """retrieve_context should return concatenated chunk text."""
         from app.services.rag_service import retrieve_context
 
@@ -175,50 +189,59 @@ class TestRetrieveContext:
         mock_retriever = MagicMock()
         mock_retriever.aretrieve = AsyncMock(return_value=[node1, node2])
 
+        mock_get_async_store.return_value = MagicMock()
         mock_index = MagicMock()
         mock_index.as_retriever.return_value = mock_retriever
-        mock_get_index.return_value = mock_index
+        mock_index_cls.from_vector_store.return_value = mock_index
 
         result = await retrieve_context(uuid4(), "อธิบายการสังเคราะห์แสง")
 
         assert "เฉลย" in result
         assert "Rubric" in result
 
-    @patch("app.services.rag_service.get_index_for_exam")
+    @patch("app.services.rag_service.VectorStoreIndex")
+    @patch("app.services.rag_service._get_async_vector_store")
     @patch("app.services.rag_service.get_embed_model")
     @patch("app.services.rag_service.Settings")
-    async def test_returns_fallback_when_no_chunks(self, mock_settings, mock_embed, mock_get_index):
+    async def test_returns_fallback_when_no_chunks(
+        self, mock_settings, mock_embed, mock_get_async_store, mock_index_cls
+    ):
         """retrieve_context should return fallback text when no chunks found."""
         from app.services.rag_service import retrieve_context
 
         mock_embed.return_value = MagicMock()
 
+        mock_get_async_store.return_value = MagicMock()
         mock_retriever = MagicMock()
         mock_retriever.aretrieve = AsyncMock(return_value=[])
 
         mock_index = MagicMock()
         mock_index.as_retriever.return_value = mock_retriever
-        mock_get_index.return_value = mock_index
+        mock_index_cls.from_vector_store.return_value = mock_index
 
         result = await retrieve_context(uuid4(), "คำถาม")
         assert "ไม่พบเนื้อหาอ้างอิง" in result
 
-    @patch("app.services.rag_service.get_index_for_exam")
+    @patch("app.services.rag_service.VectorStoreIndex")
+    @patch("app.services.rag_service._get_async_vector_store")
     @patch("app.services.rag_service.get_embed_model")
     @patch("app.services.rag_service.Settings")
-    async def test_uses_exam_id_metadata_filter(self, mock_settings, mock_embed, mock_get_index):
+    async def test_uses_exam_id_metadata_filter(
+        self, mock_settings, mock_embed, mock_get_async_store, mock_index_cls
+    ):
         """retrieve_context must pass MetadataFilters with exam_id — not a raw dict."""
         from app.services.rag_service import retrieve_context
-        from llama_index.core.vector_stores import MetadataFilters
+        from llama_index.core.vector_stores import FilterOperator, MetadataFilters
 
         mock_embed.return_value = MagicMock()
         exam_id = uuid4()
 
+        mock_get_async_store.return_value = MagicMock()
         mock_retriever = MagicMock()
         mock_retriever.aretrieve = AsyncMock(return_value=[])
         mock_index = MagicMock()
         mock_index.as_retriever.return_value = mock_retriever
-        mock_get_index.return_value = mock_index
+        mock_index_cls.from_vector_store.return_value = mock_index
 
         await retrieve_context(exam_id, "คำถาม")
 
@@ -227,13 +250,20 @@ class TestRetrieveContext:
         assert isinstance(kwargs["filters"], MetadataFilters)
         assert kwargs["filters"].filters[0].key == "exam_id"
         assert kwargs["filters"].filters[0].value == str(exam_id)
+        assert kwargs["filters"].filters[1].key == "doc_type"
+        assert kwargs["filters"].filters[1].value == [
+            "answer_key",
+            "rubric",
+            "course_material",
+        ]
+        assert kwargs["filters"].filters[1].operator == FilterOperator.IN
 
 
 # ── Tests: _call_llm_with_retry ─────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 class TestCallLlmWithRetry:
-
     async def test_returns_on_success(self):
         """Should return content on first successful call."""
         from app.services.rag_service import _call_llm_with_retry
@@ -243,7 +273,9 @@ class TestCallLlmWithRetry:
         response.message.content = '{"score": 8.0}'
         llm.chat.return_value = response
 
-        result = await _call_llm_with_retry(llm, [ChatMessage(role="user", content="test")])
+        result = await _call_llm_with_retry(
+            llm, [ChatMessage(role="user", content="test")]
+        )
         assert result == '{"score": 8.0}'
         assert llm.chat.call_count == 1
 
@@ -257,7 +289,9 @@ class TestCallLlmWithRetry:
         response.message.content = '{"score": 5.0}'
         llm.chat.side_effect = [RuntimeError("429 Too Many Requests"), response]
 
-        result = await _call_llm_with_retry(llm, [ChatMessage(role="user", content="test")])
+        result = await _call_llm_with_retry(
+            llm, [ChatMessage(role="user", content="test")]
+        )
 
         assert result == '{"score": 5.0}'
         assert llm.chat.call_count == 2

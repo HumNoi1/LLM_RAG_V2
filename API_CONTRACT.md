@@ -14,7 +14,7 @@
 | `DocType` | `answer_key` · `rubric` · `course_material` |
 | `EmbeddingStatus` | `pending` · `processing` · `completed` · `failed` |
 | `GradingStatus` | `idle` · `running` · `completed` · `failed` |
-| `GradingResultStatus` | `pending` · `approved` · `revised` |
+| `GradingResultStatus` | `pending_review` · `approved` · `revised` |
 | `SubmissionStatus` | `uploaded` · `parsed` · `grading` · `graded` · `reviewed` |
 
 ---
@@ -412,7 +412,7 @@ Refresh access token
       "max_score": 10.0,
       "reasoning": "นักเรียนอธิบายได้ครบถ้วน ระบุวัตถุดิบและผลผลิตได้ถูกต้อง แต่ขาดการอธิบายความสำคัญต่อระบบนิเวศ",
       "expert_feedback": null,
-      "status": "pending",
+      "status": "pending_review",
       "created_at": "ISODate"
     }
   ]
@@ -518,7 +518,7 @@ type UserRole = "teacher" | "admin"
 type DocType = "answer_key" | "rubric" | "course_material"
 type EmbeddingStatus = "pending" | "processing" | "completed" | "failed"
 type GradingStatus = "idle" | "running" | "completed" | "failed"
-type GradingResultStatus = "pending" | "approved" | "revised"
+type GradingResultStatus = "pending_review" | "approved" | "revised"
 type SubmissionStatus = "uploaded" | "parsed" | "grading" | "graded" | "reviewed"
 
 // Auth

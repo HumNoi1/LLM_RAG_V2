@@ -6,13 +6,23 @@ GET  /api/v1/documents?exam_id=...       ← BE-J Sprint 2
 POST /api/v1/submissions/upload          ← BE-J Sprint 2
 GET  /api/v1/submissions?exam_id=...     ← BE-J Sprint 2
 """
+
 import logging
 import os
 from pathlib import Path
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    UploadFile,
+    status,
+)
 
 from app import schemas
 from app.config import get_settings
@@ -39,7 +49,10 @@ def _get_upload_dir(exam_id: UUID, sub: str = "documents") -> Path:
 
 # ── Background task: parse + embed ────────────────────────────────────────────
 
-async def _process_and_embed_document(doc_id: str, exam_id: str, file_data: bytes, filename: str) -> None:
+
+async def _process_and_embed_document(
+    doc_id: str, exam_id: str, file_data: bytes, filename: str
+) -> None:
     """Background task: parse PDF → embed into Qdrant → update DB status."""
     try:
         # Update status → processing
@@ -68,7 +81,9 @@ async def _process_and_embed_document(doc_id: str, exam_id: str, file_data: byte
                 "chunkCount": chunk_count,
             },
         )
-        logger.info("Document %s embedded successfully (%d chunks)", doc_id, chunk_count)
+        logger.info(
+            "Document %s embedded successfully (%d chunks)", doc_id, chunk_count
+        )
 
     except (PDFParseException, EmbeddingException) as e:
         logger.error("Document processing failed for %s: %s", doc_id, e.message)
@@ -85,6 +100,7 @@ async def _process_and_embed_document(doc_id: str, exam_id: str, file_data: byte
 
 
 # ── Reference documents (answer key / rubric / course material) ───────────────
+
 
 @router.post("/upload", response_model=schemas.DocumentUploadResponse, status_code=202)
 async def upload_reference_document(
@@ -156,7 +172,7 @@ async def upload_reference_document(
     )
 
     return schemas.DocumentUploadResponse(
-        message="Document uploaded. Parsing and embedding in progress.",
+        message="Document uploaded. Embedding in progress.",
         document=schemas.DocumentResponse(
             id=doc_record.id,
             exam_id=doc_record.examId,
@@ -181,6 +197,7 @@ async def list_documents(
 
 
 # ── Student submissions ───────────────────────────────────────────────────────
+
 
 @router.post("/submissions/upload", status_code=202)
 async def upload_student_submission(
