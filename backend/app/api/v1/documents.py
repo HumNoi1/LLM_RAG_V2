@@ -9,10 +9,9 @@ GET  /api/v1/submissions?exam_id=...     ← BE-J Sprint 2
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, UploadFile
 
 from app import schemas
-from app.database import db
 from app.dependencies import get_current_user
 
 router = APIRouter()
@@ -40,32 +39,10 @@ async def list_documents(
     exam_id: UUID,
     current_user: Annotated[dict, Depends(get_current_user)] = None,
 ):
-    """List all documents for an exam with their embedding status."""
-    # Verify exam exists
-    exam = await db.exam.find_unique(where={"id": str(exam_id)})
-    if not exam:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Exam not found")
-
-    documents = await db.document.find_many(
-        where={"examId": str(exam_id)},
-        order={"createdAt": "desc"},
-    )
-
-    return schemas.DocumentListResponse(
-        documents=[
-            schemas.DocumentResponse(
-                id=doc.id,
-                exam_id=doc.examId,
-                doc_type=doc.docType,
-                original_filename=doc.originalFilename,
-                embedding_status=doc.embeddingStatus,
-                chunk_count=doc.chunkCount,
-                created_at=doc.createdAt,
-            )
-            for doc in documents
-        ],
-        total=len(documents),
-    )
+    """List all documents for an exam with their embedding status.
+    BE-J: implement in Sprint 2.
+    """
+    raise NotImplementedError
 
 
 # ── Student submissions ───────────────────────────────────────────────────────
