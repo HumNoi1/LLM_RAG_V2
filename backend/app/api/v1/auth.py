@@ -30,9 +30,9 @@ async def refresh(data: TokenRefreshRequest):
 @router.get("/me", response_model=UserResponse)
 async def get_me(current_user=Depends(get_current_user)):
     return UserResponse(
-        id=current_user.id,
-        email=current_user.email,
-        full_name=current_user.fullName,
-        role=current_user.role,
-        created_at=current_user.createdAt,
+        id=current_user["id"],
+        email=current_user["email"],
+        full_name=current_user["full_name"],
+        role=current_user["role"],
+        created_at=current_user["created_at"],
     )

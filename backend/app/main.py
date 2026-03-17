@@ -7,7 +7,6 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from app.config import get_settings
-from app.database import connect_db, disconnect_db
 from app.api.v1.auth import router as auth_router
 from app.api.v1.exams import router as exams_router
 from app.api.v1.documents import router as documents_router
@@ -17,9 +16,8 @@ from app.api.v1.review import router as review_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await connect_db()
+    # Supabase client is lazy-initialized on first use (no connect/disconnect needed)
     yield
-    await disconnect_db()
 
 
 settings = get_settings()

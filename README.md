@@ -9,7 +9,7 @@
 | Layer | Tech |
 |-------|------|
 | **Frontend** | Next.js 15 (App Router), TypeScript, Tailwind CSS |
-| **Backend** | Python 3.12, FastAPI, Prisma ORM |
+| **Backend** | Python 3.12, FastAPI, Supabase SDK |
 | **Database** | Supabase (PostgreSQL) |
 | **Embedding** | BGE-M3 (`BAAI/bge-m3`) via LlamaIndex |
 | **Vector DB** | Qdrant |
@@ -31,8 +31,6 @@ LLM_RAG_V2/
 │   │   ├── config.py
 │   │   ├── database.py
 │   │   └── main.py
-│   ├── prisma/
-│   │   └── schema.prisma
 │   ├── poc/          # PoC scripts (embedding + grading)
 │   └── .env.example
 ├── frontend/         # Next.js frontend
@@ -69,9 +67,8 @@ cd backend
 python -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-prisma generate
 
-cp .env.example .env             # Fill in values
+cp .env.example .env             # Fill in Supabase URL, keys, JWT secret, etc.
 uvicorn app.main:app --reload
 ```
 
@@ -95,8 +92,9 @@ Copy `backend/.env.example` → `backend/.env` and fill in:
 
 | Variable | Description |
 |----------|-------------|
-| `DATABASE_URL` | Supabase connection pooler URL |
-| `DIRECT_URL` | Supabase direct connection URL (for migrations) |
+| `SUPABASE_URL` | Supabase project URL (e.g. `https://xxx.supabase.co`) |
+| `SUPABASE_KEY` | Supabase anon key |
+| `SUPABASE_SERVICE_ROLE_KEY` | Supabase service role key (server-side) |
 | `JWT_SECRET_KEY` | Secret key for JWT signing |
 | `GROQ_API_KEY` | Groq API key ([console.groq.com](https://console.groq.com)) |
 | `QDRANT_HOST` | Qdrant host (default: `localhost`) |

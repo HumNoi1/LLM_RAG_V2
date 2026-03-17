@@ -1,4 +1,4 @@
-from app.database import db
+from app.database import get_supabase
 from app.core.security import (
     hash_password,
     verify_password,
@@ -11,41 +11,62 @@ from fastapi import HTTPException, status
 
 
 async def register_user(data: UserCreate) -> UserResponse:
-    existing = await db.user.find_unique(where={"email": data.email})
-    if existing:
+    supabase = get_supabase()
+
+    # Check if email already registered
+    existing = (
+        supabase.table("users")
+        .select("id")
+        .eq("email", data.email)
+        .maybe_single()
+        .execute()
+    )
+    if existing.data:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Email already registered",
         )
 
-    user = await db.user.create(
-        data={
-            "email": data.email,
-            "passwordHash": hash_password(data.password),
-            "fullName": data.full_name,
-            "role": data.role.value,
-        }
+    # Create new user
+    response = (
+        supabase.table("users")
+        .insert(
+            {
+                "email": data.email,
+                "password_hash": hash_password(data.password),
+                "full_name": data.full_name,
+                "role": data.role.value,
+            }
+        )
+        .execute()
     )
+    user = response.data[0]
 
     return UserResponse(
-        id=user.id,
-        email=user.email,
-        full_name=user.fullName,
-        role=user.role,
-        created_at=user.createdAt,
+        id=user["id"],
+        email=user["email"],
+        full_name=user["full_name"],
+        role=user["role"],
+        created_at=user["created_at"],
     )
 
 
 async def login_user(email: str, password: str) -> TokenResponse:
-    user = await db.user.find_unique(where={"email": email})
-    if not user or not verify_password(password, user.passwordHash):
+    supabase = get_supabase()
+
+    response = (
+        supabase.table("users").select("*").eq("email", email).maybe_single().execute()
+    )
+    user = response.data
+
+    if not user or not verify_password(password, user["password_hash"]):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password",
         )
 
-    access_token = create_access_token(user.id, user.role)
-    refresh_token = create_refresh_token(user.id)
+    access_token = create_access_token(user["id"], user["role"])
+    refresh_token = create_refresh_token(user["id"])
 
     return TokenResponse(
         access_token=access_token,
@@ -62,15 +83,20 @@ async def refresh_access_token(refresh_token: str) -> TokenResponse:
         )
 
     user_id = payload.get("sub")
-    user = await db.user.find_unique(where={"id": user_id})
+    supabase = get_supabase()
+    response = (
+        supabase.table("users").select("*").eq("id", user_id).maybe_single().execute()
+    )
+    user = response.data
+
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User not found",
         )
 
-    new_access_token = create_access_token(user.id, user.role)
-    new_refresh_token = create_refresh_token(user.id)
+    new_access_token = create_access_token(user["id"], user["role"])
+    new_refresh_token = create_refresh_token(user["id"])
 
     return TokenResponse(
         access_token=new_access_token,

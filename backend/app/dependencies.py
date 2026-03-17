@@ -1,23 +1,26 @@
 """
 FastAPI dependency injection — shared dependencies across all routers.
 """
+
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 from app.config import Settings, get_settings
 from app.core.security import decode_token
-from app.database import db
+from app.database import get_supabase
 
 security_scheme = HTTPBearer()
 
 
 # ── Settings ─────────────────────────────────────────────────────────────────
 
+
 def get_config() -> Settings:
     return get_settings()
 
 
 # ── Current User ─────────────────────────────────────────────────────────────
+
 
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security_scheme),
@@ -30,7 +33,12 @@ async def get_current_user(
         )
 
     user_id = payload.get("sub")
-    user = await db.user.find_unique(where={"id": user_id})
+    supabase = get_supabase()
+    response = (
+        supabase.table("users").select("*").eq("id", user_id).maybe_single().execute()
+    )
+    user = response.data
+
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -42,6 +50,7 @@ async def get_current_user(
 
 # ── Role Guard ───────────────────────────────────────────────────────────────
 
+
 def require_role(*allowed_roles: str):
     """Returns a FastAPI Depends that enforces role-based access control.
 
@@ -50,8 +59,9 @@ def require_role(*allowed_roles: str):
         async def endpoint(current_user=require_role("admin")):
             ...
     """
+
     async def role_checker(current_user=Depends(get_current_user)):
-        if current_user.role not in allowed_roles:
+        if current_user["role"] not in allowed_roles:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Insufficient permissions",
