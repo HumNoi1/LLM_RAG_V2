@@ -13,13 +13,14 @@ Questions sub-resource:
   PUT    /api/v1/exams/{exam_id}/questions/{question_id}
   DELETE /api/v1/exams/{exam_id}/questions/{question_id}
 """
+
 from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app import schemas
-from app.database import db
+from app.database import get_supabase
 from app.dependencies import get_current_user
 
 router = APIRouter()
@@ -27,48 +28,74 @@ router = APIRouter()
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
+
 async def _get_exam_or_404(exam_id: UUID):
-    exam = await db.exam.find_unique(
-        where={"id": str(exam_id)},
-        include={"questions": {"order_by": {"questionNumber": "asc"}}},
+    supabase = get_supabase()
+    response = (
+        supabase.table("exams")
+        .select("*, exam_questions(*)")
+        .eq("id", str(exam_id))
+        .maybe_single()
+        .execute()
     )
+    exam = response.data
+
     if not exam:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Exam not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Exam not found"
+        )
+
+    # Sort questions by question_number ascending
+    if exam.get("exam_questions"):
+        exam["exam_questions"].sort(key=lambda q: q["question_number"])
+    else:
+        exam["exam_questions"] = []
+
     return exam
 
 
 async def _verify_exam_owner(exam_id: UUID, user_id: str):
     exam = await _get_exam_or_404(exam_id)
-    if exam.createdBy != user_id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not the owner of this exam")
+    if exam["created_by"] != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Not the owner of this exam"
+        )
     return exam
 
 
 # ── Exam CRUD ─────────────────────────────────────────────────────────────────
+
 
 @router.post("", response_model=schemas.ExamResponse, status_code=201)
 async def create_exam(
     data: schemas.ExamCreate,
     current_user: Annotated[dict, Depends(get_current_user)],
 ):
-    exam = await db.exam.create(
-        data={
-            "title": data.title,
-            "subject": data.subject,
-            "description": data.description,
-            "totalQuestions": data.total_questions,
-            "createdBy": current_user.id,
-        }
+    supabase = get_supabase()
+    response = (
+        supabase.table("exams")
+        .insert(
+            {
+                "title": data.title,
+                "subject": data.subject,
+                "description": data.description,
+                "total_questions": data.total_questions,
+                "created_by": current_user["id"],
+            }
+        )
+        .execute()
     )
+    exam = response.data[0]
+
     return schemas.ExamResponse(
-        id=exam.id,
-        title=exam.title,
-        subject=exam.subject,
-        description=exam.description,
-        created_by=exam.createdBy,
-        total_questions=exam.totalQuestions,
-        created_at=exam.createdAt,
-        updated_at=exam.updatedAt,
+        id=exam["id"],
+        title=exam["title"],
+        subject=exam["subject"],
+        description=exam["description"],
+        created_by=exam["created_by"],
+        total_questions=exam["total_questions"],
+        created_at=exam["created_at"],
+        updated_at=exam["updated_at"],
     )
 
 
@@ -76,21 +103,27 @@ async def create_exam(
 async def list_exams(
     current_user: Annotated[dict, Depends(get_current_user)],
 ):
-    exams = await db.exam.find_many(
-        where={"createdBy": current_user.id},
-        order={"createdAt": "desc"},
+    supabase = get_supabase()
+    response = (
+        supabase.table("exams")
+        .select("*")
+        .eq("created_by", current_user["id"])
+        .order("created_at", desc=True)
+        .execute()
     )
+    exams = response.data
+
     return schemas.ExamListResponse(
         exams=[
             schemas.ExamResponse(
-                id=e.id,
-                title=e.title,
-                subject=e.subject,
-                description=e.description,
-                created_by=e.createdBy,
-                total_questions=e.totalQuestions,
-                created_at=e.createdAt,
-                updated_at=e.updatedAt,
+                id=e["id"],
+                title=e["title"],
+                subject=e["subject"],
+                description=e["description"],
+                created_by=e["created_by"],
+                total_questions=e["total_questions"],
+                created_at=e["created_at"],
+                updated_at=e["updated_at"],
             )
             for e in exams
         ],
@@ -104,30 +137,32 @@ async def get_exam(
     current_user: Annotated[dict, Depends(get_current_user)],
 ):
     exam = await _get_exam_or_404(exam_id)
-    if exam.createdBy != current_user.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not the owner of this exam")
+    if exam["created_by"] != current_user["id"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Not the owner of this exam"
+        )
 
     questions = [
         schemas.QuestionResponse(
-            id=q.id,
-            exam_id=q.examId,
-            question_number=q.questionNumber,
-            question_text=q.questionText,
-            max_score=q.maxScore,
-            created_at=q.createdAt,
+            id=q["id"],
+            exam_id=q["exam_id"],
+            question_number=q["question_number"],
+            question_text=q["question_text"],
+            max_score=q["max_score"],
+            created_at=q["created_at"],
         )
-        for q in (exam.questions or [])
+        for q in exam.get("exam_questions", [])
     ]
 
     return schemas.ExamDetailResponse(
-        id=exam.id,
-        title=exam.title,
-        subject=exam.subject,
-        description=exam.description,
-        created_by=exam.createdBy,
-        total_questions=exam.totalQuestions,
-        created_at=exam.createdAt,
-        updated_at=exam.updatedAt,
+        id=exam["id"],
+        title=exam["title"],
+        subject=exam["subject"],
+        description=exam["description"],
+        created_by=exam["created_by"],
+        total_questions=exam["total_questions"],
+        created_at=exam["created_at"],
+        updated_at=exam["updated_at"],
         questions=questions,
     )
 
@@ -138,7 +173,7 @@ async def update_exam(
     data: schemas.ExamUpdate,
     current_user: Annotated[dict, Depends(get_current_user)],
 ):
-    await _verify_exam_owner(exam_id, current_user.id)
+    await _verify_exam_owner(exam_id, current_user["id"])
 
     update_data: dict = {}
     if data.title is not None:
@@ -149,22 +184,25 @@ async def update_exam(
         update_data["description"] = data.description
 
     if not update_data:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No fields to update")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="No fields to update"
+        )
 
-    exam = await db.exam.update(
-        where={"id": str(exam_id)},
-        data=update_data,
+    supabase = get_supabase()
+    response = (
+        supabase.table("exams").update(update_data).eq("id", str(exam_id)).execute()
     )
+    exam = response.data[0]
 
     return schemas.ExamResponse(
-        id=exam.id,
-        title=exam.title,
-        subject=exam.subject,
-        description=exam.description,
-        created_by=exam.createdBy,
-        total_questions=exam.totalQuestions,
-        created_at=exam.createdAt,
-        updated_at=exam.updatedAt,
+        id=exam["id"],
+        title=exam["title"],
+        subject=exam["subject"],
+        description=exam["description"],
+        created_by=exam["created_by"],
+        total_questions=exam["total_questions"],
+        created_at=exam["created_at"],
+        updated_at=exam["updated_at"],
     )
 
 
@@ -173,86 +211,119 @@ async def delete_exam(
     exam_id: UUID,
     current_user: Annotated[dict, Depends(get_current_user)],
 ):
-    await _verify_exam_owner(exam_id, current_user.id)
-    await db.exam.delete(where={"id": str(exam_id)})
+    await _verify_exam_owner(exam_id, current_user["id"])
+    supabase = get_supabase()
+    supabase.table("exams").delete().eq("id", str(exam_id)).execute()
     return None
 
 
 # ── Questions ─────────────────────────────────────────────────────────────────
 
-@router.post("/{exam_id}/questions", response_model=schemas.QuestionResponse, status_code=201)
+
+@router.post(
+    "/{exam_id}/questions", response_model=schemas.QuestionResponse, status_code=201
+)
 async def add_question(
     exam_id: UUID,
     data: schemas.QuestionCreate,
     current_user: Annotated[dict, Depends(get_current_user)],
 ):
-    await _verify_exam_owner(exam_id, current_user.id)
+    await _verify_exam_owner(exam_id, current_user["id"])
+
+    supabase = get_supabase()
 
     # Check for duplicate question_number
-    existing = await db.examquestion.find_first(
-        where={"examId": str(exam_id), "questionNumber": data.question_number}
+    existing = (
+        supabase.table("exam_questions")
+        .select("id")
+        .eq("exam_id", str(exam_id))
+        .eq("question_number", data.question_number)
+        .maybe_single()
+        .execute()
     )
-    if existing:
+
+    if existing.data:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Question number {data.question_number} already exists for this exam",
         )
 
-    question = await db.examquestion.create(
-        data={
-            "examId": str(exam_id),
-            "questionNumber": data.question_number,
-            "questionText": data.question_text,
-            "maxScore": data.max_score,
-        }
+    response = (
+        supabase.table("exam_questions")
+        .insert(
+            {
+                "exam_id": str(exam_id),
+                "question_number": data.question_number,
+                "question_text": data.question_text,
+                "max_score": data.max_score,
+            }
+        )
+        .execute()
     )
+    question = response.data[0]
 
     return schemas.QuestionResponse(
-        id=question.id,
-        exam_id=question.examId,
-        question_number=question.questionNumber,
-        question_text=question.questionText,
-        max_score=question.maxScore,
-        created_at=question.createdAt,
+        id=question["id"],
+        exam_id=question["exam_id"],
+        question_number=question["question_number"],
+        question_text=question["question_text"],
+        max_score=question["max_score"],
+        created_at=question["created_at"],
     )
 
 
-@router.put("/{exam_id}/questions/{question_id}", response_model=schemas.QuestionResponse)
+@router.put(
+    "/{exam_id}/questions/{question_id}", response_model=schemas.QuestionResponse
+)
 async def update_question(
     exam_id: UUID,
     question_id: UUID,
     data: schemas.QuestionUpdate,
     current_user: Annotated[dict, Depends(get_current_user)],
 ):
-    await _verify_exam_owner(exam_id, current_user.id)
+    await _verify_exam_owner(exam_id, current_user["id"])
 
-    question = await db.examquestion.find_first(
-        where={"id": str(question_id), "examId": str(exam_id)}
+    supabase = get_supabase()
+    existing = (
+        supabase.table("exam_questions")
+        .select("*")
+        .eq("id", str(question_id))
+        .eq("exam_id", str(exam_id))
+        .maybe_single()
+        .execute()
     )
-    if not question:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Question not found")
+
+    if not existing.data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Question not found"
+        )
 
     update_data: dict = {}
     if data.question_text is not None:
-        update_data["questionText"] = data.question_text
+        update_data["question_text"] = data.question_text
     if data.max_score is not None:
-        update_data["maxScore"] = data.max_score
+        update_data["max_score"] = data.max_score
 
     if not update_data:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No fields to update")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="No fields to update"
+        )
 
-    updated = await db.examquestion.update(
-        where={"id": str(question_id)},
-        data=update_data,
+    response = (
+        supabase.table("exam_questions")
+        .update(update_data)
+        .eq("id", str(question_id))
+        .execute()
     )
+    updated = response.data[0]
 
     return schemas.QuestionResponse(
-        id=updated.id,
-        exam_id=updated.examId,
-        question_number=updated.questionNumber,
-        question_text=updated.questionText,
-        max_score=updated.maxScore,
-        created_at=updated.createdAt,
+        id=updated["id"],
+        exam_id=updated["exam_id"],
+        question_number=updated["question_number"],
+        question_text=updated["question_text"],
+        max_score=updated["max_score"],
+        created_at=updated["created_at"],
     )
 
 
@@ -262,13 +333,22 @@ async def delete_question(
     question_id: UUID,
     current_user: Annotated[dict, Depends(get_current_user)],
 ):
-    await _verify_exam_owner(exam_id, current_user.id)
+    await _verify_exam_owner(exam_id, current_user["id"])
 
-    question = await db.examquestion.find_first(
-        where={"id": str(question_id), "examId": str(exam_id)}
+    supabase = get_supabase()
+    existing = (
+        supabase.table("exam_questions")
+        .select("id")
+        .eq("id", str(question_id))
+        .eq("exam_id", str(exam_id))
+        .maybe_single()
+        .execute()
     )
-    if not question:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Question not found")
 
-    await db.examquestion.delete(where={"id": str(question_id)})
+    if not existing.data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Question not found"
+        )
+
+    supabase.table("exam_questions").delete().eq("id", str(question_id)).execute()
     return None

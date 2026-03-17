@@ -24,8 +24,8 @@ dependencies = [
     "torch>=2.2.0",
     # Vector DB
     "qdrant-client>=1.11.0",
-    # Database
-    "prisma>=0.15.0",
+    # Database (Supabase)
+    "supabase>=2.0.0",
     # PDF Processing
     "pdfplumber>=0.11.4",
     # Config & Utilities

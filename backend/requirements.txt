@@ -9,8 +9,8 @@ python-jose[cryptography]>=3.3.0
 passlib[bcrypt]>=1.7.4
 bcrypt>=4.2.0
 
-# ── Database (Prisma ORM) ────────────────────────────────────────────────────
-prisma>=0.15.0
+# ── Database (Supabase) ──────────────────────────────────────────────────────
+supabase>=2.0.0
 
 # ── LlamaIndex Core ──────────────────────────────────────────────────────────
 llama-index-core>=0.11.0
