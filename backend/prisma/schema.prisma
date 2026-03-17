@@ -13,43 +13,7 @@ datasource db {
 }
 
 // ========================
-// Enums
-// ========================
-
-enum UserRole {
-  teacher
-  admin
-}
-
-enum DocType {
-  answer_key
-  rubric
-  course_material
-}
-
-enum EmbeddingStatus {
-  pending
-  processing
-  completed
-  failed
-}
-
-enum SubmissionStatus {
-  uploaded
-  parsed
-  grading
-  graded
-  reviewed
-}
-
-enum GradingStatus {
-  pending_review
-  approved
-  revised
-}
-
-// ========================
-// Models
+// Models  
 // ========================
 
 model User {
@@ -57,7 +21,7 @@ model User {
   email         String   @unique
   passwordHash  String   @map("password_hash")
   fullName      String   @map("full_name")
-  role          UserRole @default(teacher)
+  role          String   @default("teacher") // teacher, admin
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @updatedAt @map("updated_at")
 
@@ -115,14 +79,14 @@ model Rubric {
 }
 
 model Document {
-  id               String          @id @default(uuid()) @db.Uuid
-  examId           String          @map("exam_id") @db.Uuid
-  docType          DocType         @map("doc_type")
-  originalFilename String          @map("original_filename")
-  filePath         String          @map("file_path")
-  embeddingStatus  EmbeddingStatus @default(pending) @map("embedding_status")
-  chunkCount       Int             @default(0) @map("chunk_count")
-  createdAt        DateTime        @default(now()) @map("created_at")
+  id               String   @id @default(uuid()) @db.Uuid
+  examId           String   @map("exam_id") @db.Uuid
+  docType          String   @map("doc_type") // answer_key, rubric, course_material
+  originalFilename String   @map("original_filename")
+  filePath         String   @map("file_path")
+  embeddingStatus  String   @default("pending") @map("embedding_status") // pending, processing, completed, failed
+  chunkCount       Int      @default(0) @map("chunk_count")
+  createdAt        DateTime @default(now()) @map("created_at")
 
   exam Exam @relation(fields: [examId], references: [id], onDelete: Cascade)
 
@@ -144,14 +108,14 @@ model Student {
 }
 
 model StudentSubmission {
-  id               String           @id @default(uuid()) @db.Uuid
-  examId           String           @map("exam_id") @db.Uuid
-  studentId        String           @map("student_id") @db.Uuid
-  originalFilename String           @map("original_filename")
-  filePath         String           @map("file_path")
-  parsedText       String?          @map("parsed_text") @db.Text
-  status           SubmissionStatus @default(uploaded)
-  createdAt        DateTime         @default(now()) @map("created_at")
+  id               String   @id @default(uuid()) @db.Uuid
+  examId           String   @map("exam_id") @db.Uuid
+  studentId        String   @map("student_id") @db.Uuid
+  originalFilename String   @map("original_filename")
+  filePath         String   @map("file_path")
+  parsedText       String?  @map("parsed_text") @db.Text
+  status           String   @default("uploaded") @map("status") // uploaded, parsed, grading, graded, reviewed
+  createdAt        DateTime @default(now()) @map("created_at")
 
   exam           Exam            @relation(fields: [examId], references: [id], onDelete: Cascade)
   student        Student         @relation(fields: [studentId], references: [id])
@@ -162,20 +126,20 @@ model StudentSubmission {
 }
 
 model GradingResult {
-  id                String        @id @default(uuid()) @db.Uuid
-  submissionId      String        @map("submission_id") @db.Uuid
-  questionId        String        @map("question_id") @db.Uuid
-  studentAnswerText String?       @map("student_answer_text") @db.Text
-  llmScore          Float?        @map("llm_score")
-  llmMaxScore       Float?        @map("llm_max_score")
-  llmReasoning      String?       @map("llm_reasoning") @db.Text
-  llmModelUsed      String?       @map("llm_model_used")
-  expertScore       Float?        @map("expert_score")
-  expertFeedback    String?       @map("expert_feedback") @db.Text
-  status            GradingStatus @default(pending_review)
-  gradedAt          DateTime?     @map("graded_at")
-  reviewedAt        DateTime?     @map("reviewed_at")
-  reviewedBy        String?       @map("reviewed_by") @db.Uuid
+  id                String    @id @default(uuid()) @db.Uuid
+  submissionId      String    @map("submission_id") @db.Uuid
+  questionId        String    @map("question_id") @db.Uuid
+  studentAnswerText String?   @map("student_answer_text") @db.Text
+  llmScore          Float?    @map("llm_score")
+  llmMaxScore       Float?    @map("llm_max_score")
+  llmReasoning      String?   @map("llm_reasoning") @db.Text
+  llmModelUsed      String?   @map("llm_model_used")
+  expertScore       Float?    @map("expert_score")
+  expertFeedback    String?   @map("expert_feedback") @db.Text
+  status            String    @default("pending_review") @map("status") // pending_review, approved, revised
+  gradedAt          DateTime? @map("graded_at")
+  reviewedAt        DateTime? @map("reviewed_at")
+  reviewedBy        String?   @map("reviewed_by") @db.Uuid
 
   submission StudentSubmission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
   question   ExamQuestion      @relation(fields: [questionId], references: [id])
