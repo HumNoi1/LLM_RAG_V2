@@ -15,12 +15,14 @@ Rate limiting:
   - Groq free tier: 30 req/min for llama-3.3-70b
   - Use exponential backoff on HTTP 429
 """
+
 import asyncio
 import logging
 import re
+from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
-from app.database import get_supabase
+from app.database import get_supabase, maybe_single_safe
 from app.services import rag_service
 
 logger = logging.getLogger(__name__)
@@ -90,7 +92,11 @@ def split_answer_by_question(
     if len(unique_boundaries) == num_questions:
         result: dict[int, str] = {}
         for i, (pos, qnum) in enumerate(unique_boundaries):
-            end = unique_boundaries[i + 1][0] if i + 1 < len(unique_boundaries) else len(text)
+            end = (
+                unique_boundaries[i + 1][0]
+                if i + 1 < len(unique_boundaries)
+                else len(text)
+            )
             result[qnum] = text[pos:end].strip()
         return result
 
@@ -128,7 +134,12 @@ async def _grade_with_backoff(
             msg = str(exc).lower()
             is_rate_limit = "429" in msg or "rate limit" in msg or "too many" in msg
             if is_rate_limit and attempt < retries:
-                logger.warning("Rate limited — retrying in %ds (attempt %d/%d)", wait, attempt, retries)
+                logger.warning(
+                    "Rate limited — retrying in %ds (attempt %d/%d)",
+                    wait,
+                    attempt,
+                    retries,
+                )
                 await asyncio.sleep(wait)
             else:
                 raise
@@ -177,7 +188,9 @@ async def start_grading(exam_id: UUID) -> None:
         parsed_text = sub.get("parsed_text") or ""
 
         # Mark submission as grading
-        supabase.table("student_submissions").update({"status": "grading"}).eq("id", sub_id).execute()
+        supabase.table("student_submissions").update({"status": "grading"}).eq(
+            "id", sub_id
+        ).execute()
 
         answer_map = split_answer_by_question(parsed_text, num_questions)
 
@@ -200,13 +213,11 @@ async def start_grading(exam_id: UUID) -> None:
                 reasoning = result["reasoning"]
 
                 # Upsert grading result (avoid duplicates on re-run)
-                existing = (
+                existing = maybe_single_safe(
                     supabase.table("grading_results")
                     .select("id")
                     .eq("submission_id", sub_id)
                     .eq("question_id", q_id)
-                    .maybe_single()
-                    .execute()
                 )
                 if existing.data:
                     supabase.table("grading_results").update(
@@ -222,6 +233,7 @@ async def start_grading(exam_id: UUID) -> None:
                         }
                     ).eq("id", existing.data["id"]).execute()
                 else:
+                    now = datetime.now(timezone.utc).isoformat()
                     supabase.table("grading_results").insert(
                         {
                             "id": str(uuid4()),
@@ -235,18 +247,26 @@ async def start_grading(exam_id: UUID) -> None:
                             "status": "pending",
                             "expert_score": None,
                             "expert_feedback": None,
+                            "created_at": now,
                         }
                     ).execute()
 
             except Exception as exc:
                 logger.exception(
-                    "Grading failed for submission=%s question=%s: %s", sub_id, q_id, exc
+                    "Grading failed for submission=%s question=%s: %s",
+                    sub_id,
+                    q_id,
+                    exc,
                 )
                 graded_ok = False
 
         # Mark submission status
-        new_status = "graded" if graded_ok else "parsed"  # revert to parsed so it can be retried
-        supabase.table("student_submissions").update({"status": new_status}).eq("id", sub_id).execute()
+        new_status = (
+            "graded" if graded_ok else "parsed"
+        )  # revert to parsed so it can be retried
+        supabase.table("student_submissions").update({"status": new_status}).eq(
+            "id", sub_id
+        ).execute()
         logger.info("start_grading: submission %s → %s", sub_id, new_status)
 
     logger.info("start_grading: completed for exam %s", exam_id)

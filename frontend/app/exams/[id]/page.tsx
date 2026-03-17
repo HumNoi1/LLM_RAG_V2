@@ -1,10 +1,12 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowLeft, FileText, FolderOpen, ListChecks, ClipboardList } from "lucide-react";
+import { ArrowLeft, FileText, FolderOpen, ListChecks, ClipboardList, Upload, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PdfPreview } from "@/components/PdfPreview";
+import api from "@/lib/api";
+import type { SubmissionSummary } from "@/types/document";
 
 type TabKey = "info" | "documents" | "answers" | "grading";
 
@@ -43,6 +45,16 @@ export default function ExamDetailPage() {
   const [documents, setDocuments] = useState<StoredDocument[]>([]);
   const [error, setError] = useState<string | null>(null);
 
+  // Student submissions state
+  const [submissions, setSubmissions] = useState<SubmissionSummary[]>([]);
+  const [submissionsLoading, setSubmissionsLoading] = useState(false);
+  const [submissionsError, setSubmissionsError] = useState<string | null>(null);
+  const [uploadStudentId, setUploadStudentId] = useState("");
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [uploadSuccess, setUploadSuccess] = useState<string | null>(null);
+
   useEffect(() => {
     if (!id) {
       setError("ไม่พบรหัสข้อสอบ");
@@ -73,6 +85,53 @@ export default function ExamDetailPage() {
     const parsedDocs = storedDocs ? JSON.parse(storedDocs) : null;
     setDocuments(Array.isArray(parsedDocs) ? parsedDocs : []);
   }, [id]);
+
+  // Auto-load submissions when navigating to the answers tab
+  useEffect(() => {
+    if (activeTab === "answers") {
+      fetchSubmissions();
+    }
+  }, [activeTab, fetchSubmissions]); = useCallback(async () => {
+    if (!id) return;
+    setSubmissionsLoading(true);
+    setSubmissionsError(null);
+    try {
+      const resp = await api.get(`/documents/submissions?exam_id=${id}`);
+      setSubmissions(resp.data.submissions ?? []);
+    } catch {
+      setSubmissionsError("ไม่สามารถโหลดรายการคำตอบได้");
+    } finally {
+      setSubmissionsLoading(false);
+    }
+  }, [id]);
+
+  const handleSubmissionUpload = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!uploadFile || !uploadStudentId.trim() || !id) return;
+    setUploading(true);
+    setUploadError(null);
+    setUploadSuccess(null);
+    try {
+      const formData = new FormData();
+      formData.append("exam_id", id);
+      formData.append("student_id", uploadStudentId.trim());
+      formData.append("file", uploadFile);
+      await api.post("/documents/submissions/upload", formData, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+      setUploadSuccess("อัปโหลดสำเร็จ กำลังประมวลผล...");
+      setUploadFile(null);
+      setUploadStudentId("");
+      fetchSubmissions();
+    } catch (err: unknown) {
+      const msg =
+        (err as { response?: { data?: { detail?: string } } })?.response?.data
+          ?.detail ?? "เกิดข้อผิดพลาดในการอัปโหลด";
+      setUploadError(msg);
+    } finally {
+      setUploading(false);
+    }
+  };
 
   const tabs = useMemo(
     () => [
@@ -387,13 +446,154 @@ export default function ExamDetailPage() {
             </div>
           )}
           {activeTab === "answers" && (
-            <div className="space-y-4">
-              <h2 className="text-lg font-semibold text-slate-900">คำตอบนักศึกษา</h2>
-              <p className="text-sm text-slate-600">
-                ยังไม่มีการเก็บคำตอบนักศึกษาใน mock storage แต่ตรงนี้จะเป็นที่สำหรับแสดงรายการไฟล์ที่นักศึกษาส่ง
-              </p>
-              <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 p-6 text-center">
-                <p className="text-sm text-slate-500">(Placeholder) รายการคำตอบนักศึกษา</p>
+            <div className="space-y-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-lg font-semibold text-slate-900">คำตอบนักศึกษา</h2>
+                  <p className="text-sm text-slate-500">อัปโหลด PDF คำตอบของนักศึกษา (ต้องระบุ Student UUID)</p>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={fetchSubmissions}
+                  disabled={submissionsLoading}
+                >
+                  <RefreshCw size={14} className={submissionsLoading ? "animate-spin" : ""} />
+                  รีเฟรช
+                </Button>
+              </div>
+
+              {/* Upload form */}
+              <form
+                onSubmit={handleSubmissionUpload}
+                className="rounded-xl border border-slate-200 bg-slate-50 p-5 space-y-4"
+              >
+                <h3 className="text-sm font-semibold text-slate-800">อัปโหลดคำตอบใหม่</h3>
+
+                {uploadError ? (
+                  <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                    {uploadError}
+                  </div>
+                ) : null}
+                {uploadSuccess ? (
+                  <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700">
+                    {uploadSuccess}
+                  </div>
+                ) : null}
+
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-slate-600">
+                      Student UUID
+                    </label>
+                    <input
+                      type="text"
+                      value={uploadStudentId}
+                      onChange={(e) => setUploadStudentId(e.target.value)}
+                      placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                      className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-slate-600">
+                      ไฟล์ PDF คำตอบ
+                    </label>
+                    <label
+                      className="flex cursor-pointer items-center gap-2 rounded-lg border border-dashed border-slate-300 bg-white px-3 py-2 text-sm text-slate-600 hover:border-indigo-400 transition"
+                      onDragOver={(e) => e.preventDefault()}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        const f = e.dataTransfer.files[0];
+                        if (f) setUploadFile(f);
+                      }}
+                    >
+                      <Upload size={14} />
+                      {uploadFile ? uploadFile.name : "ลากวางหรือคลิกเพื่อเลือกไฟล์"}
+                      <input
+                        type="file"
+                        accept=".pdf"
+                        className="sr-only"
+                        onChange={(e) => setUploadFile(e.target.files?.[0] ?? null)}
+                        required
+                      />
+                    </label>
+                  </div>
+                </div>
+
+                <div className="flex justify-end">
+                  <Button
+                    type="submit"
+                    disabled={uploading || !uploadFile || !uploadStudentId.trim()}
+                  >
+                    {uploading ? "กำลังอัปโหลด..." : "อัปโหลด"}
+                  </Button>
+                </div>
+              </form>
+
+              {/* Submission list */}
+              <div>
+                <h3 className="mb-3 text-sm font-semibold text-slate-800">
+                  รายการที่ส่งแล้ว ({submissions.length})
+                </h3>
+
+                {submissionsError ? (
+                  <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                    {submissionsError}
+                  </div>
+                ) : submissions.length === 0 ? (
+                  <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm text-slate-500">
+                    {submissionsLoading ? "กำลังโหลด..." : "ยังไม่มีคำตอบที่ส่ง"}
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto rounded-xl border border-slate-200">
+                    <table className="w-full text-sm">
+                      <thead className="bg-slate-50 text-xs font-semibold text-slate-600">
+                        <tr>
+                          <th className="px-4 py-3 text-left">ชื่อนักศึกษา</th>
+                          <th className="px-4 py-3 text-left">รหัสนักศึกษา</th>
+                          <th className="px-4 py-3 text-left">สถานะ</th>
+                          <th className="px-4 py-3 text-right">คะแนน</th>
+                          <th className="px-4 py-3 text-right">ตรวจแล้ว</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 bg-white">
+                        {submissions.map((sub) => (
+                          <tr key={sub.id} className="hover:bg-slate-50">
+                            <td className="px-4 py-3 font-medium text-slate-800">
+                              {sub.student_name || "—"}
+                            </td>
+                            <td className="px-4 py-3 text-slate-600">
+                              {sub.student_code || "—"}
+                            </td>
+                            <td className="px-4 py-3">
+                              <span
+                                className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${
+                                  sub.status === "graded"
+                                    ? "bg-emerald-100 text-emerald-700"
+                                    : sub.status === "parsed"
+                                    ? "bg-blue-100 text-blue-700"
+                                    : "bg-slate-100 text-slate-600"
+                                }`}
+                              >
+                                {sub.status}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-right text-slate-800">
+                              {sub.total_score != null
+                                ? `${sub.total_score} / ${sub.max_total_score}`
+                                : "—"}
+                            </td>
+                            <td className="px-4 py-3 text-right text-slate-600">
+                              {sub.graded_questions} / {sub.total_questions}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
             </div>
           )}

@@ -7,7 +7,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 from app.config import Settings, get_settings
 from app.core.security import decode_token
-from app.database import get_supabase
+from app.database import get_supabase, maybe_single_safe
 
 security_scheme = HTTPBearer()
 
@@ -34,9 +34,7 @@ async def get_current_user(
 
     user_id = payload.get("sub")
     supabase = get_supabase()
-    response = (
-        supabase.table("users").select("*").eq("id", user_id).maybe_single().execute()
-    )
+    response = maybe_single_safe(supabase.table("users").select("*").eq("id", user_id))
     user = response.data
 
     if not user:

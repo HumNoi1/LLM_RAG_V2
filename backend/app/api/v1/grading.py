@@ -4,13 +4,14 @@ Grading endpoints — BE-S responsibility (Sprint 3).
 POST /api/v1/grading/start
 GET  /api/v1/grading/status/{exam_id}
 """
+
 from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 
 from app import schemas
-from app.database import get_supabase
+from app.database import get_supabase, maybe_single_safe
 from app.dependencies import get_current_user
 from app.services import grading_service
 
@@ -29,15 +30,13 @@ async def start_grading(
     supabase = get_supabase()
 
     # Verify exam exists
-    exam_resp = (
-        supabase.table("exams")
-        .select("id")
-        .eq("id", str(data.exam_id))
-        .maybe_single()
-        .execute()
+    exam_resp = maybe_single_safe(
+        supabase.table("exams").select("id").eq("id", str(data.exam_id))
     )
     if not exam_resp.data:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Exam not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Exam not found"
+        )
 
     # Check if grading is already running (any submission in 'grading' state)
     running_resp = (
@@ -55,7 +54,10 @@ async def start_grading(
         )
 
     background_tasks.add_task(grading_service.start_grading, data.exam_id)
-    return {"message": f"Grading started for exam {data.exam_id}", "exam_id": data.exam_id}
+    return {
+        "message": f"Grading started for exam {data.exam_id}",
+        "exam_id": data.exam_id,
+    }
 
 
 @router.get("/status/{exam_id}", response_model=schemas.GradingProgressResponse)
@@ -67,15 +69,13 @@ async def grading_status(
     supabase = get_supabase()
 
     # Verify exam exists
-    exam_resp = (
-        supabase.table("exams")
-        .select("id")
-        .eq("id", str(exam_id))
-        .maybe_single()
-        .execute()
+    exam_resp = maybe_single_safe(
+        supabase.table("exams").select("id").eq("id", str(exam_id))
     )
     if not exam_resp.data:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Exam not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Exam not found"
+        )
 
     # Count submissions by status
     subs_resp = (

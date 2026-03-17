@@ -14,13 +14,14 @@ Questions sub-resource:
   DELETE /api/v1/exams/{exam_id}/questions/{question_id}
 """
 
+from datetime import datetime, timezone
 from typing import Annotated
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app import schemas
-from app.database import get_supabase
+from app.database import get_supabase, maybe_single_safe
 from app.dependencies import get_current_user
 
 router = APIRouter()
@@ -31,12 +32,8 @@ router = APIRouter()
 
 async def _get_exam_or_404(exam_id: UUID):
     supabase = get_supabase()
-    response = (
-        supabase.table("exams")
-        .select("*, exam_questions(*)")
-        .eq("id", str(exam_id))
-        .maybe_single()
-        .execute()
+    response = maybe_single_safe(
+        supabase.table("exams").select("*, exam_questions(*)").eq("id", str(exam_id))
     )
     exam = response.data
 
@@ -72,15 +69,19 @@ async def create_exam(
     current_user: Annotated[dict, Depends(get_current_user)],
 ):
     supabase = get_supabase()
+    now = datetime.now(timezone.utc).isoformat()
     response = (
         supabase.table("exams")
         .insert(
             {
+                "id": str(uuid4()),
                 "title": data.title,
                 "subject": data.subject,
                 "description": data.description,
                 "total_questions": data.total_questions,
                 "created_by": current_user["id"],
+                "created_at": now,
+                "updated_at": now,
             }
         )
         .execute()
@@ -233,13 +234,11 @@ async def add_question(
     supabase = get_supabase()
 
     # Check for duplicate question_number
-    existing = (
+    existing = maybe_single_safe(
         supabase.table("exam_questions")
         .select("id")
         .eq("exam_id", str(exam_id))
         .eq("question_number", data.question_number)
-        .maybe_single()
-        .execute()
     )
 
     if existing.data:
@@ -252,10 +251,12 @@ async def add_question(
         supabase.table("exam_questions")
         .insert(
             {
+                "id": str(uuid4()),
                 "exam_id": str(exam_id),
                 "question_number": data.question_number,
                 "question_text": data.question_text,
                 "max_score": data.max_score,
+                "created_at": datetime.now(timezone.utc).isoformat(),
             }
         )
         .execute()
@@ -284,13 +285,11 @@ async def update_question(
     await _verify_exam_owner(exam_id, current_user["id"])
 
     supabase = get_supabase()
-    existing = (
+    existing = maybe_single_safe(
         supabase.table("exam_questions")
         .select("*")
         .eq("id", str(question_id))
         .eq("exam_id", str(exam_id))
-        .maybe_single()
-        .execute()
     )
 
     if not existing.data:
@@ -336,13 +335,11 @@ async def delete_question(
     await _verify_exam_owner(exam_id, current_user["id"])
 
     supabase = get_supabase()
-    existing = (
+    existing = maybe_single_safe(
         supabase.table("exam_questions")
         .select("id")
         .eq("id", str(question_id))
         .eq("exam_id", str(exam_id))
-        .maybe_single()
-        .execute()
     )
 
     if not existing.data:

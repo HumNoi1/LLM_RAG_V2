@@ -8,6 +8,7 @@ PUT  /api/v1/review/results/{result_id}/revise       — override score + feedba
 POST /api/v1/review/exams/{exam_id}/approve-all      — bulk approve
 GET  /api/v1/review/exams/{exam_id}/export           — CSV export
 """
+
 import csv
 import io
 import logging
@@ -18,7 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 
 from app import schemas
-from app.database import get_supabase
+from app.database import get_supabase, maybe_single_safe
 from app.dependencies import get_current_user
 
 logger = logging.getLogger(__name__)
@@ -27,33 +28,34 @@ router = APIRouter()
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
+
 def _get_submission_or_404(submission_id: str) -> dict:
     """Fetch a submission row or raise 404."""
     supabase = get_supabase()
-    resp = (
+    resp = maybe_single_safe(
         supabase.table("student_submissions")
         .select("*, students(full_name, student_code)")
         .eq("id", submission_id)
-        .maybe_single()
-        .execute()
     )
     if not resp.data:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Submission not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Submission not found"
+        )
     return resp.data
 
 
 def _get_result_or_404(result_id: str) -> dict:
     """Fetch a grading_result row or raise 404."""
     supabase = get_supabase()
-    resp = (
+    resp = maybe_single_safe(
         supabase.table("grading_results")
         .select("*, exam_questions(question_number, max_score)")
         .eq("id", result_id)
-        .maybe_single()
-        .execute()
     )
     if not resp.data:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Grading result not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Grading result not found"
+        )
     return resp.data
 
 
@@ -77,7 +79,9 @@ def _build_grading_result_response(row: dict) -> schemas.GradingResultResponse:
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 
-@router.get("/exams/{exam_id}/submissions", response_model=schemas.SubmissionListResponse)
+@router.get(
+    "/exams/{exam_id}/submissions", response_model=schemas.SubmissionListResponse
+)
 async def list_submissions_with_summary(
     exam_id: UUID,
     current_user: Annotated[dict, Depends(get_current_user)],
@@ -86,15 +90,13 @@ async def list_submissions_with_summary(
     supabase = get_supabase()
 
     # Verify exam exists and get total_questions
-    exam_resp = (
-        supabase.table("exams")
-        .select("id, total_questions")
-        .eq("id", str(exam_id))
-        .maybe_single()
-        .execute()
+    exam_resp = maybe_single_safe(
+        supabase.table("exams").select("id, total_questions").eq("id", str(exam_id))
     )
     if not exam_resp.data:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Exam not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Exam not found"
+        )
 
     total_questions = exam_resp.data.get("total_questions", 0)
 
@@ -125,7 +127,9 @@ async def list_submissions_with_summary(
             (r.get("exam_questions") or {}).get("max_score", 0) for r in results
         )
         scored = [
-            r.get("expert_score") if r.get("expert_score") is not None else r.get("llm_score", 0)
+            r.get("expert_score")
+            if r.get("expert_score") is not None
+            else r.get("llm_score", 0)
             for r in results
             if r.get("status") in ("approved", "revised")
         ]
@@ -147,7 +151,9 @@ async def list_submissions_with_summary(
     return schemas.SubmissionListResponse(submissions=summaries, total=len(summaries))
 
 
-@router.get("/submissions/{submission_id}", response_model=schemas.SubmissionDetailResponse)
+@router.get(
+    "/submissions/{submission_id}", response_model=schemas.SubmissionDetailResponse
+)
 async def get_submission_detail(
     submission_id: UUID,
     current_user: Annotated[dict, Depends(get_current_user)],
@@ -189,7 +195,9 @@ async def get_submission_detail(
     )
 
 
-@router.put("/results/{result_id}/approve", response_model=schemas.GradingResultResponse)
+@router.put(
+    "/results/{result_id}/approve", response_model=schemas.GradingResultResponse
+)
 async def approve_result(
     result_id: UUID,
     current_user: Annotated[dict, Depends(get_current_user)],
@@ -255,15 +263,13 @@ async def bulk_approve(
     supabase = get_supabase()
 
     # Verify exam exists
-    exam_resp = (
-        supabase.table("exams")
-        .select("id")
-        .eq("id", str(exam_id))
-        .maybe_single()
-        .execute()
+    exam_resp = maybe_single_safe(
+        supabase.table("exams").select("id").eq("id", str(exam_id))
     )
     if not exam_resp.data:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Exam not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Exam not found"
+        )
 
     # Fetch all pending result IDs for this exam (via submission join)
     pending_resp = (
@@ -276,12 +282,16 @@ async def bulk_approve(
     pending_results = pending_resp.data or []
 
     if not pending_results:
-        return schemas.BulkApproveResponse(approved_count=0, message="No pending results to approve")
+        return schemas.BulkApproveResponse(
+            approved_count=0, message="No pending results to approve"
+        )
 
     pending_ids = [r["id"] for r in pending_results]
 
     # Bulk update
-    supabase.table("grading_results").update({"status": "approved"}).in_("id", pending_ids).execute()
+    supabase.table("grading_results").update({"status": "approved"}).in_(
+        "id", pending_ids
+    ).execute()
 
     approved_count = len(pending_ids)
     return schemas.BulkApproveResponse(
@@ -303,15 +313,15 @@ async def export_results_csv(
     supabase = get_supabase()
 
     # Verify exam exists
-    exam_resp = (
+    exam_resp = maybe_single_safe(
         supabase.table("exams")
         .select("id, title, total_questions")
         .eq("id", str(exam_id))
-        .maybe_single()
-        .execute()
     )
     if not exam_resp.data:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Exam not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Exam not found"
+        )
 
     exam_data = exam_resp.data
 
@@ -367,7 +377,9 @@ async def export_results_csv(
 
         for qnum in q_numbers:
             # Find the question id for this number
-            qid = next((q["id"] for q in questions if q["question_number"] == qnum), None)
+            qid = next(
+                (q["id"] for q in questions if q["question_number"] == qnum), None
+            )
             if qid and qid in results_by_qid:
                 r = results_by_qid[qid]
                 effective = (
@@ -375,7 +387,9 @@ async def export_results_csv(
                     if r.get("expert_score") is not None
                     else r.get("llm_score", 0)
                 )
-                q_max = r.get("llm_max_score") or (q_ids.get(qid) or {}).get("max_score", 0)
+                q_max = r.get("llm_max_score") or (q_ids.get(qid) or {}).get(
+                    "max_score", 0
+                )
                 row += [effective, q_max]
                 total_score += effective or 0
                 max_total += q_max or 0

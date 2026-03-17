@@ -6,6 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Plus, Trash2, ArrowLeft } from "lucide-react";
+import { examApi } from "@/lib/api";
+import api from "@/lib/api";
 
 interface QuestionFormItem {
   id: string;
@@ -63,39 +65,28 @@ export default function CreateExamPage() {
     setSaving(true);
 
     try {
-      const examId = crypto.randomUUID();
-      const now = new Date().toISOString();
-      const exam = {
-        id: examId,
+      // 1. Create the exam
+      const exam = await examApi.createExam({
         title: title.trim(),
         subject: subject.trim(),
-        description: description.trim() || null,
-        created_by: "user-1",
+        description: description.trim() || undefined,
         total_questions: questions.length,
-        created_at: now,
-        updated_at: now,
-      };
+      });
 
-      // Persist to localStorage (mock database)
-      const stored =
-        JSON.parse(localStorage.getItem("mockExams") ?? "null") ?? [];
-      localStorage.setItem("mockExams", JSON.stringify([...stored, exam]));
-
-      // Store question details separately (mock)
-      localStorage.setItem(
-        `mockExamQuestions_${examId}`,
-        JSON.stringify(
-          questions.map((q, idx) => ({
+      // 2. Add each question
+      await Promise.all(
+        questions.map((q, idx) =>
+          api.post(`/exams/${exam.id}/questions`, {
             question_number: idx + 1,
             question_text: q.question_text.trim(),
             max_score: q.max_score,
-          }))
+          })
         )
       );
 
       router.push("/dashboard");
     } catch (err) {
-      setError("เกิดข้อผิดพลาดในการสร้างข้อสอบ");
+      setError("เกิดข้อผิดพลาดในการสร้างข้อสอบ กรุณาลองใหม่อีกครั้ง");
       console.error(err);
     } finally {
       setSaving(false);

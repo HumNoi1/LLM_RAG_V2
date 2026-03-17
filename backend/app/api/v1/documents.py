@@ -8,6 +8,7 @@ GET  /api/v1/documents/submissions?exam_id=... <- BE-J Sprint 2
 """
 
 import logging
+from datetime import datetime, timezone
 from typing import Annotated
 from uuid import UUID, uuid4
 
@@ -23,7 +24,7 @@ from fastapi import (
 )
 
 from app import schemas
-from app.database import get_supabase
+from app.database import get_supabase, maybe_single_safe
 from app.dependencies import get_current_user
 from app.services import embedding_service, pdf_service
 
@@ -33,24 +34,26 @@ router = APIRouter()
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
+
 def _verify_exam_owner(exam_id: UUID, user_id: str) -> dict:
     """Raise 404 if exam not found, 403 if not owner. Returns exam row."""
     supabase = get_supabase()
-    resp = (
-        supabase.table("exams")
-        .select("id, created_by")
-        .eq("id", str(exam_id))
-        .maybe_single()
-        .execute()
+    resp = maybe_single_safe(
+        supabase.table("exams").select("id, created_by").eq("id", str(exam_id))
     )
     if not resp.data:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Exam not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Exam not found"
+        )
     if resp.data["created_by"] != user_id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Access denied"
+        )
     return resp.data
 
 
 # ── Background task: parse + embed reference document ─────────────────────────
+
 
 async def _embed_document_task(
     doc_id: str,
@@ -63,7 +66,9 @@ async def _embed_document_task(
     supabase = get_supabase()
 
     # Mark as processing
-    supabase.table("documents").update({"embedding_status": "processing"}).eq("id", doc_id).execute()
+    supabase.table("documents").update({"embedding_status": "processing"}).eq(
+        "id", doc_id
+    ).execute()
 
     try:
         text = pdf_service.parse_pdf_bytes(pdf_bytes, filename=original_filename)
@@ -79,10 +84,13 @@ async def _embed_document_task(
         logger.info("Embedded doc %s — %d chunks", doc_id, chunk_count)
     except Exception as exc:
         logger.exception("Embedding failed for doc %s: %s", doc_id, exc)
-        supabase.table("documents").update({"embedding_status": "failed"}).eq("id", doc_id).execute()
+        supabase.table("documents").update({"embedding_status": "failed"}).eq(
+            "id", doc_id
+        ).execute()
 
 
 # ── Background task: parse student submission ─────────────────────────────────
+
 
 async def _parse_submission_task(
     submission_id: str,
@@ -133,6 +141,7 @@ async def upload_reference_document(
 
     supabase = get_supabase()
     doc_id = str(uuid4())
+    now = datetime.now(timezone.utc).isoformat()
 
     # Insert document record with 'pending' status
     resp = (
@@ -143,9 +152,10 @@ async def upload_reference_document(
                 "exam_id": str(exam_id),
                 "doc_type": doc_type.value,
                 "original_filename": file.filename or "upload.pdf",
-                "file_path": "",          # Not storing to disk/S3 in this version
+                "file_path": "",  # Not storing to disk/S3 in this version
                 "embedding_status": "pending",
-                "chunk_count": None,
+                "chunk_count": 0,
+                "created_at": now,
             }
         )
         .execute()
@@ -185,12 +195,8 @@ async def list_documents(
     supabase = get_supabase()
 
     # Verify exam exists
-    exam_response = (
-        supabase.table("exams")
-        .select("id")
-        .eq("id", str(exam_id))
-        .maybe_single()
-        .execute()
+    exam_response = maybe_single_safe(
+        supabase.table("exams").select("id").eq("id", str(exam_id))
     )
     if not exam_response.data:
         raise HTTPException(
@@ -249,26 +255,22 @@ async def upload_student_submission(
     supabase = get_supabase()
 
     # Verify exam exists
-    exam_resp = (
-        supabase.table("exams")
-        .select("id")
-        .eq("id", str(exam_id))
-        .maybe_single()
-        .execute()
+    exam_resp = maybe_single_safe(
+        supabase.table("exams").select("id").eq("id", str(exam_id))
     )
     if not exam_resp.data:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Exam not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Exam not found"
+        )
 
     # Verify student exists
-    student_resp = (
-        supabase.table("students")
-        .select("id")
-        .eq("id", str(student_id))
-        .maybe_single()
-        .execute()
+    student_resp = maybe_single_safe(
+        supabase.table("students").select("id").eq("id", str(student_id))
     )
     if not student_resp.data:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Student not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Student not found"
+        )
 
     pdf_bytes = await file.read()
     if len(pdf_bytes) == 0:
@@ -279,6 +281,7 @@ async def upload_student_submission(
 
     submission_id = str(uuid4())
     original_filename = file.filename or "submission.pdf"
+    now = datetime.now(timezone.utc).isoformat()
 
     # Insert submission record with 'uploaded' status
     supabase.table("student_submissions").insert(
@@ -290,6 +293,7 @@ async def upload_student_submission(
             "file_path": "",
             "parsed_text": None,
             "status": "uploaded",
+            "created_at": now,
         }
     ).execute()
 
@@ -316,22 +320,22 @@ async def list_submissions(
     supabase = get_supabase()
 
     # Verify exam exists
-    exam_resp = (
-        supabase.table("exams")
-        .select("id, total_questions")
-        .eq("id", str(exam_id))
-        .maybe_single()
-        .execute()
+    exam_resp = maybe_single_safe(
+        supabase.table("exams").select("id, total_questions").eq("id", str(exam_id))
     )
     if not exam_resp.data:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Exam not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Exam not found"
+        )
 
     total_questions = exam_resp.data.get("total_questions", 0)
 
     # Fetch submissions with student info
     subs_resp = (
         supabase.table("student_submissions")
-        .select("id, student_id, original_filename, status, created_at, students(full_name, student_code)")
+        .select(
+            "id, student_id, original_filename, status, created_at, students(full_name, student_code)"
+        )
         .eq("exam_id", str(exam_id))
         .order("created_at", desc=True)
         .execute()
