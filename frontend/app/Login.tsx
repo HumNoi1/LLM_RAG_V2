@@ -92,6 +92,19 @@ export default function App() {
         return;
       }
 
+      // Mock login for UI development (replace with real API when ready)
+      if (formData.email === 'boomjostar112@gmail.com' && formData.password === 'Boomboom1a#') {
+        localStorage.setItem('authToken', 'fake-token');
+        localStorage.setItem('refreshToken', 'fake-refresh-token');
+        localStorage.setItem('user', JSON.stringify({ email: formData.email, full_name: 'Test User', role: 'teacher' }));
+
+        setMessage({ type: 'success', text: 'เข้าสู่ระบบสำเร็จ (mock)' });
+        setTimeout(() => {
+          router.push('/dashboard');
+        }, 800);
+        return;
+      }
+
       try {
         const loginRes = await api.post('/auth/login', {
           email: formData.email,

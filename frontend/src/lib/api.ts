@@ -94,3 +94,37 @@ api.interceptors.response.use(
 );
 
 export default api;
+
+// ─── Exam API Functions ──────────────────────────────────────────────────────
+import { ExamResponse, ExamListResponse, CreateExamRequest, UpdateExamRequest } from '@/types/exam';
+
+export const examApi = {
+  // Get all exams
+  getExams: async (): Promise<ExamListResponse> => {
+    const response = await api.get('/exams');
+    return response.data;
+  },
+
+  // Get single exam
+  getExam: async (examId: string): Promise<ExamResponse> => {
+    const response = await api.get(`/exams/${examId}`);
+    return response.data;
+  },
+
+  // Create exam
+  createExam: async (data: CreateExamRequest): Promise<ExamResponse> => {
+    const response = await api.post('/exams', data);
+    return response.data;
+  },
+
+  // Update exam
+  updateExam: async (examId: string, data: UpdateExamRequest): Promise<ExamResponse> => {
+    const response = await api.put(`/exams/${examId}`, data);
+    return response.data;
+  },
+
+  // Delete exam
+  deleteExam: async (examId: string): Promise<void> => {
+    await api.delete(`/exams/${examId}`);
+  },
+};
