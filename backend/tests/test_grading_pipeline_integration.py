@@ -373,9 +373,10 @@ async def test_grade_partial_failure_on_timeout(monkeypatch):
     # Submission ควร graded สำเร็จ แม้ข้อ 1 จะ timeout
     assert fake_submissions[0].status == "graded"
 
-    # ควรมี grading result 1 ข้อ (ข้อ 2 สำเร็จ)
-    assert len(fake_db.gradingresult.rows) == 1
-    assert fake_db.gradingresult.rows[0].llmScore == 4.0
+    # ควรมี grading result 2 ข้อ (ข้อ 1 timeout → score 0, ข้อ 2 สำเร็จ)
+    assert len(fake_db.gradingresult.rows) == 2
+    assert fake_db.gradingresult.rows[0].llmScore == 0.0  # timeout → score 0
+    assert fake_db.gradingresult.rows[1].llmScore == 4.0
 
     progress = await grading_service.get_grading_status(exam_id)
     assert progress["status"] == "completed"
@@ -624,3 +625,155 @@ class TestSplitAnswerByQuestion:
         text = "Question 1 Answer one\n\nQuestion 2 Answer two"
         result = grading_service.split_answer_by_question(text, 2)
         assert len(result) >= 2
+
+
+# ── Test 10: Concurrent grading start (409) ──────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_concurrent_grading_start_returns_conflict(monkeypatch):
+    """P0: เรียก start_grading ซ้ำขณะที่ grading กำลัง run อยู่ ต้องถูกป้องกัน"""
+    exam_id = uuid4()
+
+    # Simulate a running grading job
+    grading_service.reset_grading_progress(exam_id)
+    assert grading_service.is_grading_running(exam_id) is True
+
+    # Verify the guard detects it
+    assert grading_service.is_grading_running(exam_id) is True
+
+    # After completion, guard should allow new start
+    progress = grading_service.get_grading_progress(exam_id)
+    progress.status = "completed"
+    assert grading_service.is_grading_running(exam_id) is False
+
+    # Clean up
+    grading_service._grading_progress.pop(exam_id, None)
+
+
+# ── Test 11: LLM failure produces score=0 result for every failed question ──
+
+
+@pytest.mark.asyncio
+async def test_all_questions_have_results_even_on_failure(monkeypatch):
+    """P0: ทุก question ต้องมี grading result แม้ LLM error — score=0 พร้อมเหตุผล"""
+    exam_id = uuid4()
+    student_id = str(uuid4())
+
+    fake_questions = [
+        SimpleNamespace(
+            id=str(uuid4()),
+            examId=str(exam_id),
+            questionNumber=1,
+            questionText="ข้อที่ 1",
+            maxScore=10.0,
+        ),
+        SimpleNamespace(
+            id=str(uuid4()),
+            examId=str(exam_id),
+            questionNumber=2,
+            questionText="ข้อที่ 2",
+            maxScore=5.0,
+        ),
+        SimpleNamespace(
+            id=str(uuid4()),
+            examId=str(exam_id),
+            questionNumber=3,
+            questionText="ข้อที่ 3",
+            maxScore=8.0,
+        ),
+    ]
+
+    fake_submissions = [
+        SimpleNamespace(
+            id=str(uuid4()),
+            examId=str(exam_id),
+            studentId=student_id,
+            parsedText="ข้อ 1 คำตอบ A\n\nข้อ 2 คำตอบ B\n\nข้อ 3 คำตอบ C",
+            status="parsed",
+        )
+    ]
+
+    fake_students = {
+        student_id: SimpleNamespace(id=student_id, fullName="Test Student"),
+    }
+
+    fake_db = _FakeDb(
+        docs={},
+        questions=fake_questions,
+        submissions=fake_submissions,
+        students=fake_students,
+    )
+
+    call_count = {"n": 0}
+
+    async def _fail_all(exam_id, question_text, student_answer, max_score):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            raise GroqTimeoutException(60)
+        elif call_count["n"] == 2:
+            raise LLMException("model overloaded")
+        else:
+            # Q3 succeeds
+            return {
+                "score": 7.0,
+                "reasoning": "ดีมาก",
+                "covered_points": ["p1"],
+                "missed_points": [],
+            }
+
+    monkeypatch.setattr(grading_service, "db", fake_db)
+    monkeypatch.setattr(grading_service, "query_for_grading", _fail_all)
+    monkeypatch.setattr(
+        grading_service,
+        "get_settings",
+        lambda: _make_fake_settings(),
+    )
+
+    await grading_service.start_grading(exam_id)
+
+    # All 3 questions must have a grading result
+    assert len(fake_db.gradingresult.rows) == 3
+
+    # Q1: timeout → score 0
+    q1_result = fake_db.gradingresult.rows[0]
+    assert q1_result.llmScore == 0.0
+    assert "ขัดข้อง" in q1_result.llmReasoning
+
+    # Q2: LLM error → score 0
+    q2_result = fake_db.gradingresult.rows[1]
+    assert q2_result.llmScore == 0.0
+    assert "ขัดข้อง" in q2_result.llmReasoning
+
+    # Q3: success → score 7.0
+    q3_result = fake_db.gradingresult.rows[2]
+    assert q3_result.llmScore == 7.0
+
+    # Submission should be graded (at least 1 question succeeded)
+    assert fake_submissions[0].status == "graded"
+
+    progress = await grading_service.get_grading_status(exam_id)
+    assert progress["status"] == "completed"
+    assert progress["failed"] == 2  # 2 question-level failures
+
+
+# ── Test 12: Paragraph-based fallback split ──────────────────────────────────
+
+
+class TestParagraphFallbackSplit:
+    """P1: fallback split ต้องแบ่งตาม paragraph ไม่ใช่ตัดด้วยความยาวตัวอักษร"""
+
+    def test_paragraphs_distributed_evenly(self):
+        text = "Para A content\n\nPara B content\n\nPara C content\n\nPara D content"
+        result = grading_service.split_answer_by_question(text, 2)
+        assert len(result) == 2
+        # Should not cut in the middle of a word
+        assert "Para A" in result[1]
+        assert "Para D" in result[2]
+
+    def test_single_paragraph_for_multiple_questions(self):
+        """ถ้า paragraph น้อยกว่า question → ส่งทั้งหมดเป็น Q1"""
+        text = "Only one paragraph with all content"
+        result = grading_service.split_answer_by_question(text, 3)
+        assert 1 in result
+        assert result[1] == text

@@ -237,7 +237,7 @@ axios, zustand, react-pdf
 - LlamaIndex `HuggingFaceEmbedding` with `BAAI/bge-m3`
 - Chunking: `SentenceSplitter(chunk_size=512, chunk_overlap=50)`
 - Metadata per chunk: `exam_id`, `doc_type`, `question_number`
-- Qdrant collection per exam: `exam_{exam_id}`
+- Qdrant single collection `exam_documents` with metadata filter (`exam_id`, `doc_type`)
 
 ### Step 3.3 — RAG Query Pipeline
 - `VectorStoreIndex` from Qdrant
@@ -340,7 +340,7 @@ Context (เฉลย + Rubric + เนื้อหา): {context}
 | Custom JWT (ไม่ใช้ Supabase Auth) | python-jose + bcrypt, ยืดหยุ่นกว่า |
 | FastAPI BackgroundTasks | เพียงพอสำหรับ <50 คน, ไม่ต้อง Celery |
 | BGE-M3 local | multilingual Thai support ดี, ไม่ต้อง API |
-| Qdrant collection per exam | isolate vectors, ง่ายต่อ cleanup |
+| Qdrant single collection + metadata filter | query-time filter by exam_id, simpler management |
 
 ---
 

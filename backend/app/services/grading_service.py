@@ -49,6 +49,12 @@ def reset_grading_progress(exam_id: uuid.UUID) -> GradingProgress:
     return _grading_progress[exam_id]
 
 
+def is_grading_running(exam_id: uuid.UUID) -> bool:
+    """Check if grading is currently running for an exam."""
+    progress = _grading_progress.get(exam_id)
+    return progress is not None and progress.status == "running"
+
+
 # ── Student answer splitting ────────────────────────────────────────────────────
 
 
@@ -100,16 +106,23 @@ def split_answer_by_question(
                 logger.info(f"Split by pattern '{pattern}': {len(parts)} parts")
                 return parts
 
-    # Fallback: simple equal split by newlines or paragraphs
-    logger.warning("Regex split failed, using equal split fallback")
-    paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
+    # Fallback: distribute paragraphs across questions evenly
+    logger.warning("Regex split failed, using paragraph-distribution fallback")
+    paragraphs = [p.strip() for p in re.split(r"\n\s*\n|\n", text) if p.strip()]
+
+    if not paragraphs:
+        return {1: text}
+
     if len(paragraphs) >= num_questions:
-        avg_len = len(text) // num_questions
-        parts = {}
-        for i in range(num_questions):
-            start = i * avg_len
-            end = start + avg_len if i < num_questions - 1 else len(text)
-            parts[i + 1] = text[start:end].strip()
+        # Distribute paragraphs as evenly as possible across questions
+        parts: dict[int, str] = {}
+        base, extra = divmod(len(paragraphs), num_questions)
+        idx = 0
+        for q in range(num_questions):
+            count = base + (1 if q < extra else 0)
+            chunk = paragraphs[idx : idx + count]
+            parts[q + 1] = "\n\n".join(chunk)
+            idx += count
         return parts
 
     # Last resort: return whole text as answer for question 1
@@ -365,18 +378,52 @@ async def start_grading(exam_id: uuid.UUID) -> None:
                         )
 
                     except GroqTimeoutException as e:
-                        # Sprint 4: Timeout — บันทึก error แต่ไม่หยุด submission ทั้งหมด
+                        # Sprint 4: Timeout — บันทึก score=0 พร้อมเหตุผล แล้วไปข้อถัดไป
                         err_msg = f"Q{question_num} timeout: {e.message}"
                         logger.error(err_msg)
                         submission_errors.append(err_msg)
+                        try:
+                            await db.gradingresult.create(
+                                data={
+                                    "id": str(uuid.uuid4()),
+                                    "submissionId": submission.id,
+                                    "questionId": question.id,
+                                    "studentAnswerText": student_answer,
+                                    "llmScore": 0.0,
+                                    "llmMaxScore": question.maxScore,
+                                    "llmReasoning": f"ให้คะแนน 0 เนื่องจากระบบขัดข้อง: {e.message}",
+                                    "llmModelUsed": settings.llm_model,
+                                    "status": "pending_review",
+                                    "gradedAt": datetime.now(timezone.utc),
+                                }
+                            )
+                        except Exception as save_err:
+                            logger.error("Failed to save timeout result: %s", save_err)
                         progress.failed += 1
                         continue
 
                     except LLMException as e:
-                        # Sprint 4: LLM error — บันทึก error แต่ไม่หยุด submission ทั้งหมด
+                        # Sprint 4: LLM error — บันทึก score=0 พร้อมเหตุผล แล้วไปข้อถัดไป
                         err_msg = f"Q{question_num} LLM error: {e.message}"
                         logger.error(err_msg)
                         submission_errors.append(err_msg)
+                        try:
+                            await db.gradingresult.create(
+                                data={
+                                    "id": str(uuid.uuid4()),
+                                    "submissionId": submission.id,
+                                    "questionId": question.id,
+                                    "studentAnswerText": student_answer,
+                                    "llmScore": 0.0,
+                                    "llmMaxScore": question.maxScore,
+                                    "llmReasoning": f"ให้คะแนน 0 เนื่องจากระบบขัดข้อง: {e.message}",
+                                    "llmModelUsed": settings.llm_model,
+                                    "status": "pending_review",
+                                    "gradedAt": datetime.now(timezone.utc),
+                                }
+                            )
+                        except Exception as save_err:
+                            logger.error("Failed to save LLM error result: %s", save_err)
                         progress.failed += 1
                         continue
 
@@ -384,6 +431,23 @@ async def start_grading(exam_id: uuid.UUID) -> None:
                         err_msg = f"Q{question_num} unexpected error: {str(e)}"
                         logger.error(err_msg, exc_info=True)
                         submission_errors.append(err_msg)
+                        try:
+                            await db.gradingresult.create(
+                                data={
+                                    "id": str(uuid.uuid4()),
+                                    "submissionId": submission.id,
+                                    "questionId": question.id,
+                                    "studentAnswerText": student_answer,
+                                    "llmScore": 0.0,
+                                    "llmMaxScore": question.maxScore,
+                                    "llmReasoning": f"ให้คะแนน 0 เนื่องจากระบบขัดข้อง: {str(e)}",
+                                    "llmModelUsed": settings.llm_model,
+                                    "status": "pending_review",
+                                    "gradedAt": datetime.now(timezone.utc),
+                                }
+                            )
+                        except Exception as save_err:
+                            logger.error("Failed to save error result: %s", save_err)
                         progress.failed += 1
                         continue
 

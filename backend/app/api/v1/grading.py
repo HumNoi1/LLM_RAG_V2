@@ -11,7 +11,9 @@ from uuid import UUID
 from fastapi import APIRouter, BackgroundTasks, Depends
 
 from app import schemas
+from app.database import db
 from app.dependencies import get_current_user
+from app.core.exceptions import GradingInProgressException, NotFoundException
 from app.services import grading_service
 
 router = APIRouter()
@@ -29,6 +31,7 @@ _auth_error = {
     responses={
         **_auth_error,
         404: {"model": schemas.ErrorResponse, "description": "ไม่พบข้อสอบที่ระบุ"},
+        409: {"model": schemas.ErrorResponse, "description": "กำลังตรวจอยู่แล้ว"},
     },
 )
 async def start_grading(
@@ -50,6 +53,15 @@ async def start_grading(
     - ถ้าข้อใดล้มเหลว (timeout/error) จะบันทึก score = 0 พร้อม error message แทน
     - response ส่งกลับทันที (202 Accepted)
     """
+    # Validate exam exists
+    exam = await db.exam.find_unique(where={"id": str(data.exam_id)})
+    if not exam:
+        raise NotFoundException("Exam", str(data.exam_id))
+
+    # Prevent duplicate grading while one is already running
+    if grading_service.is_grading_running(data.exam_id):
+        raise GradingInProgressException(str(data.exam_id))
+
     background_tasks.add_task(grading_service.start_grading, data.exam_id)
     return {
         "message": f"Grading started for exam {data.exam_id}",
@@ -80,6 +92,11 @@ async def grading_status(
 
     **การใช้งาน:** Frontend ควร poll endpoint นี้ทุก 2-5 วินาทีหลังจากเรียก `POST /start`
     """
+    # Validate exam exists
+    exam = await db.exam.find_unique(where={"id": str(exam_id)})
+    if not exam:
+        raise NotFoundException("Exam", str(exam_id))
+
     status = await grading_service.get_grading_status(exam_id)
     return schemas.GradingProgressResponse(
         exam_id=status["exam_id"],
