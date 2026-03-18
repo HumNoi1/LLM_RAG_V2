@@ -86,12 +86,7 @@ export default function ExamDetailPage() {
     setDocuments(Array.isArray(parsedDocs) ? parsedDocs : []);
   }, [id]);
 
-  // Auto-load submissions when navigating to the answers tab
-  useEffect(() => {
-    if (activeTab === "answers") {
-      fetchSubmissions();
-    }
-  }, [activeTab, fetchSubmissions]); = useCallback(async () => {
+  const fetchSubmissions = useCallback(async () => {
     if (!id) return;
     setSubmissionsLoading(true);
     setSubmissionsError(null);
@@ -104,6 +99,13 @@ export default function ExamDetailPage() {
       setSubmissionsLoading(false);
     }
   }, [id]);
+
+  // Auto-load submissions when navigating to the answers tab
+  useEffect(() => {
+    if (activeTab === "answers") {
+      fetchSubmissions();
+    }
+  }, [activeTab, fetchSubmissions]);
 
   const handleSubmissionUpload = async (e: React.FormEvent) => {
     e.preventDefault();
