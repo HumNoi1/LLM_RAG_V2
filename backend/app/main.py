@@ -12,6 +12,7 @@ from app.api.v1.exams import router as exams_router
 from app.api.v1.documents import router as documents_router
 from app.api.v1.grading import router as grading_router
 from app.api.v1.review import router as review_router
+from app.api.v1.admin import router as admin_router
 
 
 @asynccontextmanager
@@ -50,6 +51,7 @@ app.include_router(exams_router, prefix="/api/v1/exams", tags=["exams"])
 app.include_router(documents_router, prefix="/api/v1/documents", tags=["documents"])
 app.include_router(grading_router, prefix="/api/v1/grading", tags=["grading"])
 app.include_router(review_router, prefix="/api/v1/review", tags=["review"])
+app.include_router(admin_router, prefix="/api/v1/admin", tags=["admin"])
 
 
 # ── Health Check ─────────────────────────────────────────────────────────────

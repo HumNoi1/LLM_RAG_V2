@@ -11,7 +11,7 @@
 ```
 ┌──────────────────┐     ┌──────────────────────┐     ┌──────────────────┐
 │   Next.js 15     │────▶│   FastAPI Backend     │────▶│   Groq LLM API   │
-│   (Frontend)     │◀────│   (Python 3.12)       │◀────│   (llama-3.3)    │
+│   (Frontend)     │◀────│   (Python 3.12)       │◀────│   (Qwen3-32B)    │
 │   Port: 3000     │     │   Port: 8000          │     └──────────────────┘
 └──────────────────┘     │                       │     ┌──────────────────┐
                          │   LlamaIndex          │────▶│   Qdrant         │
@@ -20,7 +20,7 @@
                          │                       │     └──────────────────┘
                          │                       │     ┌──────────────────┐
                          │                       │────▶│   Supabase       │
-                         │                       │◀────│   (PostgreSQL)   │
+                         │                       │◀────│                  │
                          └──────────────────────┘     └──────────────────┘
 ```
 
@@ -33,7 +33,7 @@
 | **LLM** | Groq API (llama-3.3-70b-versatile) |
 | **Embedding** | BAAI/bge-m3 (local, multilingual/Thai) |
 | **Vector DB** | Qdrant (Docker) |
-| **SQL DB** | Supabase PostgreSQL |
+| **SQL DB** | Supabase |
 | **Auth** | Custom JWT (python-jose HS256 + bcrypt) |
 | **Infra** | Docker Compose |
 

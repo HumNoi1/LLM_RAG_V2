@@ -12,6 +12,7 @@ GET  /api/v1/review/exams/{exam_id}/export           — CSV export
 import csv
 import io
 import logging
+from datetime import datetime, timezone
 from typing import Annotated
 from uuid import UUID
 
@@ -27,6 +28,25 @@ router = APIRouter()
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
+
+def _verify_exam_access(exam_id: str, user: dict) -> dict:
+    """Raise 404 if exam not found, 403 if user is not owner and not admin. Returns exam row."""
+    supabase = get_supabase()
+    resp = maybe_single_safe(
+        supabase.table("exams")
+        .select("id, created_by, total_questions")
+        .eq("id", exam_id)
+    )
+    if not resp.data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Exam not found"
+        )
+    if user.get("role") != "admin" and resp.data.get("created_by") != user["id"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Access denied"
+        )
+    return resp.data
 
 
 def _get_submission_or_404(submission_id: str) -> dict:
@@ -89,16 +109,9 @@ async def list_submissions_with_summary(
     """List all submissions for an exam with grading summary."""
     supabase = get_supabase()
 
-    # Verify exam exists and get total_questions
-    exam_resp = maybe_single_safe(
-        supabase.table("exams").select("id, total_questions").eq("id", str(exam_id))
-    )
-    if not exam_resp.data:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Exam not found"
-        )
-
-    total_questions = exam_resp.data.get("total_questions", 0)
+    # Verify exam exists and user has access
+    exam_data = _verify_exam_access(str(exam_id), current_user)
+    total_questions = exam_data.get("total_questions", 0)
 
     subs_resp = (
         supabase.table("student_submissions")
@@ -208,7 +221,13 @@ async def approve_result(
 
     updated = (
         supabase.table("grading_results")
-        .update({"status": "approved"})
+        .update(
+            {
+                "status": "approved",
+                "reviewed_at": datetime.now(timezone.utc).isoformat(),
+                "reviewed_by": current_user["id"],
+            }
+        )
         .eq("id", str(result_id))
         .execute()
     )
@@ -244,6 +263,8 @@ async def revise_result(
                 "expert_score": data.expert_score,
                 "expert_feedback": data.expert_feedback,
                 "status": "revised",
+                "reviewed_at": datetime.now(timezone.utc).isoformat(),
+                "reviewed_by": current_user["id"],
             }
         )
         .eq("id", str(result_id))
@@ -262,14 +283,8 @@ async def bulk_approve(
     """Bulk approve all 'pending' grading results for an exam."""
     supabase = get_supabase()
 
-    # Verify exam exists
-    exam_resp = maybe_single_safe(
-        supabase.table("exams").select("id").eq("id", str(exam_id))
-    )
-    if not exam_resp.data:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Exam not found"
-        )
+    # Verify exam exists and user has access
+    _verify_exam_access(str(exam_id), current_user)
 
     # Fetch all pending result IDs for this exam (via submission join)
     pending_resp = (
@@ -289,9 +304,13 @@ async def bulk_approve(
     pending_ids = [r["id"] for r in pending_results]
 
     # Bulk update
-    supabase.table("grading_results").update({"status": "approved"}).in_(
-        "id", pending_ids
-    ).execute()
+    supabase.table("grading_results").update(
+        {
+            "status": "approved",
+            "reviewed_at": datetime.now(timezone.utc).isoformat(),
+            "reviewed_by": current_user["id"],
+        }
+    ).in_("id", pending_ids).execute()
 
     approved_count = len(pending_ids)
     return schemas.BulkApproveResponse(
@@ -312,18 +331,8 @@ async def export_results_csv(
     """
     supabase = get_supabase()
 
-    # Verify exam exists
-    exam_resp = maybe_single_safe(
-        supabase.table("exams")
-        .select("id, title, total_questions")
-        .eq("id", str(exam_id))
-    )
-    if not exam_resp.data:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Exam not found"
-        )
-
-    exam_data = exam_resp.data
+    # Verify exam exists and user has access
+    exam_data = _verify_exam_access(str(exam_id), current_user)
 
     # Fetch questions (to know columns)
     questions_resp = (

@@ -13,7 +13,7 @@ Covers:
 """
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 from uuid import UUID
 
 from app.core.exceptions import EmbeddingException
@@ -48,8 +48,7 @@ def _make_mock_qdrant_client(collection_exists: bool = True, scroll_points: int 
 
 
 class TestEmbedDocument:
-    @pytest.mark.asyncio
-    async def test_returns_chunk_count(self):
+    def test_returns_chunk_count(self):
         mock_embed = _make_mock_embed_model()
         mock_client = _make_mock_qdrant_client(scroll_points=4)
 
@@ -69,7 +68,7 @@ class TestEmbedDocument:
             mock_sc_cls.from_defaults.return_value = MagicMock()
             mock_idx_cls.from_documents.return_value = MagicMock()
 
-            result = await embedding_service.embed_document(
+            result = embedding_service.embed_document(
                 exam_id=EXAM_ID,
                 doc_id=DOC_ID,
                 doc_type="answer_key",
@@ -78,8 +77,7 @@ class TestEmbedDocument:
 
         assert result == 4
 
-    @pytest.mark.asyncio
-    async def test_raises_embedding_exception_on_qdrant_error(self):
+    def test_raises_embedding_exception_on_qdrant_error(self):
         mock_embed = _make_mock_embed_model()
         mock_client = MagicMock()
         mock_client.scroll.side_effect = RuntimeError("Qdrant connection refused")
@@ -100,7 +98,7 @@ class TestEmbedDocument:
             mock_idx_cls.from_documents.return_value = MagicMock()
 
             with pytest.raises(EmbeddingException):
-                await embedding_service.embed_document(
+                embedding_service.embed_document(
                     exam_id=EXAM_ID,
                     doc_id=DOC_ID,
                     doc_type="rubric",
@@ -112,30 +110,27 @@ class TestEmbedDocument:
 
 
 class TestDeleteExamEmbeddings:
-    @pytest.mark.asyncio
-    async def test_deletes_when_collection_exists(self):
+    def test_deletes_when_collection_exists(self):
         mock_client = _make_mock_qdrant_client(collection_exists=True)
 
         with patch.object(
             embedding_service, "_get_qdrant_client", return_value=mock_client
         ):
-            await embedding_service.delete_exam_embeddings(EXAM_ID)
+            embedding_service.delete_exam_embeddings(EXAM_ID)
 
         mock_client.delete.assert_called_once()
 
-    @pytest.mark.asyncio
-    async def test_no_op_when_collection_missing(self):
+    def test_no_op_when_collection_missing(self):
         mock_client = _make_mock_qdrant_client(collection_exists=False)
 
         with patch.object(
             embedding_service, "_get_qdrant_client", return_value=mock_client
         ):
-            await embedding_service.delete_exam_embeddings(EXAM_ID)
+            embedding_service.delete_exam_embeddings(EXAM_ID)
 
         mock_client.delete.assert_not_called()
 
-    @pytest.mark.asyncio
-    async def test_raises_embedding_exception_on_error(self):
+    def test_raises_embedding_exception_on_error(self):
         mock_client = MagicMock()
         mock_client.collection_exists.side_effect = RuntimeError("Qdrant down")
 
@@ -143,4 +138,4 @@ class TestDeleteExamEmbeddings:
             embedding_service, "_get_qdrant_client", return_value=mock_client
         ):
             with pytest.raises(EmbeddingException):
-                await embedding_service.delete_exam_embeddings(EXAM_ID)
+                embedding_service.delete_exam_embeddings(EXAM_ID)

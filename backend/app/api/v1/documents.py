@@ -39,7 +39,9 @@ def _verify_exam_owner(exam_id: UUID, user_id: str) -> dict:
     """Raise 404 if exam not found, 403 if not owner. Returns exam row."""
     supabase = get_supabase()
     resp = maybe_single_safe(
-        supabase.table("exams").select("id, created_by").eq("id", str(exam_id))
+        supabase.table("exams")
+        .select("id, created_by, total_questions")
+        .eq("id", str(exam_id))
     )
     if not resp.data:
         raise HTTPException(
@@ -55,14 +57,14 @@ def _verify_exam_owner(exam_id: UUID, user_id: str) -> dict:
 # ── Background task: parse + embed reference document ─────────────────────────
 
 
-async def _embed_document_task(
+def _embed_document_task(
     doc_id: str,
     exam_id: UUID,
     doc_type: str,
     pdf_bytes: bytes,
     original_filename: str,
 ) -> None:
-    """Parse PDF, embed into Qdrant, update DB status. Runs in BackgroundTasks."""
+    """Parse PDF, embed into Qdrant, update DB status. Runs in BackgroundTasks thread pool."""
     supabase = get_supabase()
 
     # Mark as processing
@@ -72,7 +74,7 @@ async def _embed_document_task(
 
     try:
         text = pdf_service.parse_pdf_bytes(pdf_bytes, filename=original_filename)
-        chunk_count = await embedding_service.embed_document(
+        chunk_count = embedding_service.embed_document(
             exam_id=exam_id,
             doc_id=UUID(doc_id),
             doc_type=doc_type,
@@ -92,12 +94,12 @@ async def _embed_document_task(
 # ── Background task: parse student submission ─────────────────────────────────
 
 
-async def _parse_submission_task(
+def _parse_submission_task(
     submission_id: str,
     pdf_bytes: bytes,
     original_filename: str,
 ) -> None:
-    """Parse student PDF and store text in DB. Runs in BackgroundTasks."""
+    """Parse student PDF and store text in DB. Runs in BackgroundTasks thread pool."""
     supabase = get_supabase()
     try:
         text = pdf_service.parse_pdf_bytes(pdf_bytes, filename=original_filename)
@@ -194,14 +196,8 @@ async def list_documents(
     """List all documents for an exam with their embedding status."""
     supabase = get_supabase()
 
-    # Verify exam exists
-    exam_response = maybe_single_safe(
-        supabase.table("exams").select("id").eq("id", str(exam_id))
-    )
-    if not exam_response.data:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Exam not found"
-        )
+    # Verify exam exists and user owns it
+    _verify_exam_owner(exam_id, current_user["id"])
 
     # Fetch documents
     response = (
@@ -319,16 +315,9 @@ async def list_submissions(
     """List all student submissions for an exam with grading summary."""
     supabase = get_supabase()
 
-    # Verify exam exists
-    exam_resp = maybe_single_safe(
-        supabase.table("exams").select("id, total_questions").eq("id", str(exam_id))
-    )
-    if not exam_resp.data:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Exam not found"
-        )
-
-    total_questions = exam_resp.data.get("total_questions", 0)
+    # Verify exam exists and user owns it
+    exam_data = _verify_exam_owner(exam_id, current_user["id"])
+    total_questions = exam_data.get("total_questions", 0)
 
     # Fetch submissions with student info
     subs_resp = (

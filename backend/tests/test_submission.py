@@ -36,7 +36,7 @@ def _make_pdf_bytes() -> bytes:
 
 
 def _exam_row():
-    return {"id": EXAM_ID, "total_questions": 2}
+    return {"id": EXAM_ID, "total_questions": 2, "created_by": FAKE_USER_ID}
 
 
 def _student_row():

@@ -18,6 +18,7 @@ from app.dependencies import get_current_user
 # ── Current-user Fixture ──────────────────────────────────────────────────────
 
 FAKE_USER_ID = "00000000-0000-0000-0000-000000000001"
+FAKE_ADMIN_ID = "00000000-0000-0000-0000-000000000099"
 
 
 @pytest.fixture()
@@ -42,6 +43,7 @@ def make_query_mock():
     query.delete.return_value = query
     query.eq.return_value = query
     query.neq.return_value = query
+    query.in_.return_value = query
     query.order.return_value = query
     query.limit.return_value = query
     query.maybe_single.return_value = query
@@ -70,6 +72,8 @@ def mock_supabase():
     targets = [
         "app.api.v1.exams.get_supabase",
         "app.api.v1.documents.get_supabase",
+        "app.api.v1.review.get_supabase",
+        "app.api.v1.admin.get_supabase",
         "app.dependencies.get_supabase",
     ]
 
@@ -93,6 +97,32 @@ def client(mock_supabase, mock_current_user):
     get_supabase is patched at module level by mock_supabase fixture.
     """
     app.dependency_overrides[get_current_user] = lambda: mock_current_user
+
+    with TestClient(app) as c:
+        yield c
+
+    app.dependency_overrides.clear()
+
+
+# ── Admin TestClient Fixture ─────────────────────────────────────────────────
+
+
+@pytest.fixture()
+def mock_admin_user() -> dict:
+    return {
+        "id": FAKE_ADMIN_ID,
+        "email": "admin@example.com",
+        "role": "admin",
+        "full_name": "Test Admin",
+    }
+
+
+@pytest.fixture()
+def admin_client(mock_supabase, mock_admin_user):
+    """
+    FastAPI TestClient with get_current_user overridden → fake admin user.
+    """
+    app.dependency_overrides[get_current_user] = lambda: mock_admin_user
 
     with TestClient(app) as c:
         yield c

@@ -8,6 +8,7 @@ Key design decisions:
   - Metadata: exam_id, doc_type tagged on every node
   - Collection per deployment (not per exam) — filter by metadata at query time
 """
+
 import logging
 from functools import lru_cache
 from uuid import UUID
@@ -29,7 +30,11 @@ logger = logging.getLogger(__name__)
 def _get_embed_model() -> HuggingFaceEmbedding:
     """Load BGE-M3 model once and cache it for the process lifetime."""
     settings = get_settings()
-    logger.info("Loading embedding model %s on device=%s …", settings.embedding_model, settings.embedding_device)
+    logger.info(
+        "Loading embedding model %s on device=%s …",
+        settings.embedding_model,
+        settings.embedding_device,
+    )
     model = HuggingFaceEmbedding(
         model_name=settings.embedding_model,
         device=settings.embedding_device,
@@ -49,7 +54,7 @@ def _collection_name() -> str:
     return get_settings().qdrant_collection_name
 
 
-async def embed_document(
+def embed_document(
     exam_id: UUID,
     doc_id: UUID,
     doc_type: str,
@@ -113,7 +118,9 @@ async def embed_document(
             with_vectors=False,
         )
         chunk_count = len(result[0])  # result is (points, next_page_offset)
-        logger.info("Embedded doc_id=%s into %d chunks (exam=%s)", doc_id, chunk_count, exam_id)
+        logger.info(
+            "Embedded doc_id=%s into %d chunks (exam=%s)", doc_id, chunk_count, exam_id
+        )
         return chunk_count
 
     except Exception as exc:
@@ -121,7 +128,7 @@ async def embed_document(
         raise EmbeddingException(str(exc)) from exc
 
 
-async def delete_exam_embeddings(exam_id: UUID) -> None:
+def delete_exam_embeddings(exam_id: UUID) -> None:
     """Delete all Qdrant points associated with an exam.
 
     Raises:
@@ -147,5 +154,7 @@ async def delete_exam_embeddings(exam_id: UUID) -> None:
         )
         logger.info("Deleted all Qdrant points for exam_id=%s", exam_id)
     except Exception as exc:
-        logger.exception("delete_exam_embeddings failed for exam_id=%s: %s", exam_id, exc)
+        logger.exception(
+            "delete_exam_embeddings failed for exam_id=%s: %s", exam_id, exc
+        )
         raise EmbeddingException(str(exc)) from exc
